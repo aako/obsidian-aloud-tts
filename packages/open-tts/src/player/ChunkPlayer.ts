@@ -7,6 +7,7 @@ import { ChunkLoader } from "./ChunkLoader";
 import { CancellablePromise } from "./CancellablePromise";
 import { AudioTextContext } from "../models/tts-model";
 import { AudioData } from "../models/tts-model";
+import { hasReachedChunkEnd } from "./ChunkPlaybackCompletion";
 
 /**
  * Effectively the inner loop for the audio text.
@@ -141,7 +142,7 @@ export class ChunkPlayer {
   }
   /** should only be called when this.active is undefined or the current track is finished*/
   async _activate() {
-    const BUFFER_AHEAD = 3;
+    const BUFFER_AHEAD = 8;
     const CHUNK_CONTEXT_SIZE = 3; // maybe make this configurable
 
     let toReset: { indexes: number[] } | { all: true } | undefined = undefined;
@@ -244,6 +245,18 @@ export class ChunkPlayer {
           }
         }
       } else if (transitionType === "chunk-complete") {
+        // The watcher can race pause/seek/backgrounding events. Never mark
+        // unread text complete unless the playing media clock is at its end.
+        if (
+          !hasReachedChunkEnd(
+            this.system.audioSink.currentTime,
+            this.activeAudioText.currentChunk?.timelineEndSeconds,
+            this.activeAudioText.isPlaying,
+            this.system.audioSink.isPlaying,
+          )
+        ) {
+          continue;
+        }
         this.activeAudioText.goToNext();
         if (this.activeAudioText.position === -1) {
           this.system.audioSink.pause();
@@ -399,29 +412,35 @@ const whenCurrentChunkDonePlaying = (
   if (!chunk) {
     return CancellablePromise.resolve();
   }
-  let lastCurrentTime: number | undefined;
   const innerLoop = (): CancellablePromise<void> => {
-    if (!active.isPlaying) {
-      return CancellablePromise.resolve();
-    }
-    if (active.currentChunk !== chunk) {
-      return CancellablePromise.resolve();
+    // Pause, position change and background suspension are NOT completion.
+    // Other raced watchers handle the transition and cancel this poller.
+    if (!active.isPlaying || active.currentChunk !== chunk) {
+      return CancellablePromise.delay(200).thenCancellable(() => innerLoop());
     }
     const chunkEnd = chunk.timelineEndSeconds;
     if (chunkEnd == null) {
       return CancellablePromise.delay(100).thenCancellable(() => innerLoop());
     }
     const currentTime = audioSink.currentTime;
-    const hasNotProgressed = lastCurrentTime && currentTime === lastCurrentTime;
-    lastCurrentTime = currentTime;
     const remaining = chunkEnd - currentTime;
-    // frequently seems to report lower duration before the reported total duration, so
-    // this is necessary otherwise it will stall
-    if (remaining <= 0.1 || (hasNotProgressed && remaining < 1)) {
+    if (
+      hasReachedChunkEnd(
+        currentTime,
+        chunkEnd,
+        active.isPlaying,
+        audioSink.isPlaying,
+      )
+    ) {
       return CancellablePromise.resolve();
     }
+    // Recheck periodically using media time, never wall-clock time.
+    // A stalled media clock must remain on the same spoken chunk.
     const speed = settings.playbackSpeed;
-    const playbackMultiple = (remaining * 1000) / speed;
+    const playbackMultiple = Math.min(
+      1000,
+      Math.max(100, (remaining * 1000) / speed),
+    );
     const playbackChanged = CancellablePromise.from(
       mobx.when(() => settings.playbackSpeed !== speed),
     );

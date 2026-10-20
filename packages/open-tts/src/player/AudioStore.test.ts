@@ -125,6 +125,7 @@ describe("AudioStore", () => {
         "First there was one bottle top. ",
         "Then there were two bottle tops. ",
         "Penultimately there were three bottle tops. ",
+        "Finally there were four bottle tops.",
       ]);
       sink.currentTime = duration;
       await vi.advanceTimersByTimeAsync(duration * 1000);
@@ -181,18 +182,29 @@ describe("AudioStore", () => {
         },
       );
       await waitForPassing(async () => {
-        expect(tts.call.mock.calls.length).toEqual(3);
+        expect(tts.call.mock.calls.length).toEqual(5);
       });
       mobx.runInAction(() => {
         settings.openai_ttsVoice = "onyx";
       });
       expect(store.activeText?.position).toEqual(0);
       await waitForPassing(async () => {
-        expect(tts.call.mock.calls.length).toEqual(6);
+        expect(tts.call.mock.calls.length).toEqual(10);
       });
       expect(
         tts.call.mock.calls.map((call) => call[1]?.voice || "shimmer"),
-      ).toEqual(["shimmer", "shimmer", "shimmer", "onyx", "onyx", "onyx"]);
+      ).toEqual([
+        "shimmer",
+        "shimmer",
+        "shimmer",
+        "shimmer",
+        "shimmer",
+        "onyx",
+        "onyx",
+        "onyx",
+        "onyx",
+        "onyx",
+      ]);
     });
 
     test("track switching should remain timely when playback rate changes", async () => {
