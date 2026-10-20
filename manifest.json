@@ -1,9 +1,9 @@
 {
   "id": "aloud-ios-fork",
   "name": "Aloud (iOS Fork)",
-  "version": "0.15.1-ios.1",
+  "version": "0.15.1-ios.2",
   "minAppVersion": "0.15.0",
-  "description": "Independent Aloud fork with experimental iOS lock-screen playback fixes.",
+  "description": "Independent Aloud iOS fork with conservative, durable reading bookmarks and playback fixes.",
   "author": "Adrian Lyjak",
   "authorUrl": "https://github.com/adrianlyjak",
   "fundingUrl": "https://ko-fi.com/adrianlyjak",

@@ -20,6 +20,7 @@ export * from "./player/AudioTextChunk";
 export * from "./player/CancellablePromise";
 export * from "./player/ChunkLoader";
 export * from "./player/ChunkPlayer";
+export * from "./player/ReadingFingerprint";
 export * from "./player/TTSActions";
 export * from "./player/TTSPluginSettings";
 export * from "./player/onMultiTextChanged";

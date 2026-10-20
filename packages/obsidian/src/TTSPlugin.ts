@@ -1,7 +1,8 @@
 import { TTSCodeMirror } from "./TTSCodemirror";
 import { createPlayerSynchronizer } from "@open-tts/ui";
 
-import { MarkdownView, Plugin, addIcon } from "obsidian";
+import { MarkdownView, Plugin, TFile, Notice, addIcon } from "obsidian";
+import { ReadingProgress, readingFingerprint } from "./ReadingProgress";
 import { REGISTRY } from "open-tts";
 import { TTSSettingTab } from "./components/TTSPluginSettingsTab";
 import { AudioSink } from "open-tts";
@@ -37,6 +38,7 @@ export default class TTSPlugin extends Plugin {
   editorAction: TTSEditorAction | undefined;
   detachedPlayerHost: DetachedPlayerHost | undefined;
   private _playerSyncDisposer: (() => void) | undefined;
+  private progress: ReadingProgress;
 
   get player(): AudioStore {
     return this.system.audioStore;
@@ -118,6 +120,12 @@ export default class TTSPlugin extends Plugin {
         }
         void this.bridge.playClipboard();
       },
+    });
+
+    this.addCommand({
+      id: "resume-last-reading",
+      name: "Resume last reading (saved progress)",
+      callback: () => void this.resumeSavedReading(),
     });
 
     // Editor action button - always present, behavior differs by platform
@@ -260,7 +268,8 @@ export default class TTSPlugin extends Plugin {
     );
   }
 
-  onunload() {
+  async onunload(): Promise<void> {
+    await this.progress?.stop();
     this.detachedPlayerHost?.destroy();
     this.editorAction?.destroy();
     this._playerSyncDisposer?.();
@@ -268,6 +277,43 @@ export default class TTSPlugin extends Plugin {
     this.audio?.destroy();
     this.bridge?.destroy();
     this.cache?.destroy();
+  }
+
+  private async resumeSavedReading(): Promise<void> {
+    const saved = this.progress.latest;
+    if (!saved) {
+      new Notice("No saved reading progress yet.");
+      return;
+    }
+    const file = this.app.vault.getAbstractFileByPath(saved.path);
+    if (!(file instanceof TFile)) {
+      new Notice("Saved article no longer exists.");
+      return;
+    }
+    const fullText = await this.app.vault.read(file);
+    const selection = fullText.slice(saved.start, saved.end);
+    if (readingFingerprint(selection) !== saved.fingerprint) {
+      new Notice(
+        "Article changed since the checkpoint; refusing to skip text.",
+      );
+      return;
+    }
+    const opts = {
+      filename: [file.path, file.name].join("/"),
+      sourcePath: file.path,
+      text: selection,
+      start: saved.start,
+      end: saved.end,
+    };
+    const position = this.progress.positionFor(opts);
+    if (position == null) {
+      new Notice("Reading checkpoint no longer matches this article.");
+      return;
+    }
+    const leaf = this.app.workspace.getLeaf(false);
+    await leaf.openFile(file);
+    await this.bridge.playSavedReading({ ...opts, resumeChunkIndex: position });
+    new Notice("Resumed from a saved sentence boundary.");
   }
 
   async loadSettings() {
@@ -290,7 +336,21 @@ export default class TTSPlugin extends Plugin {
         backgroundLoaderIntervalMillis: 1000,
       }),
     });
-    this.bridge = new ObsidianBridgeImpl(this.app, this.player, this.settings);
+    this.progress = new ReadingProgress(
+      this.app,
+      this.app.vault.adapter,
+      this.player,
+      this.settings,
+      this.manifest.id,
+    );
+    await this.progress.load();
+    this.bridge = new ObsidianBridgeImpl(
+      this.app,
+      this.player,
+      this.settings,
+      this.progress,
+    );
+    this.progress.start();
   }
 }
 

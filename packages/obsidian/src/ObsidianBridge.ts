@@ -14,10 +14,11 @@ import {
 import * as React from "react";
 import { createRoot, Root } from "react-dom/client";
 import { IsPlaying } from "./components/ObsidianIsPlaying";
-import { AudioStore } from "open-tts";
+import { AudioStore, AudioTextOptions } from "open-tts";
 import { hashString } from "open-tts";
 import { TTSPluginSettingsStore } from "open-tts";
 import { TTSEditorBridge } from "@open-tts/ui";
+import type { ReadingProgress } from "./ReadingProgress";
 
 export interface ObsidianBridgeSpecifics {
   activeObsidianEditor: Editor | undefined;
@@ -36,6 +37,7 @@ export interface ObsidianBridge
   playDetached: (text: string, filename?: string) => void;
   playSelection: () => void;
   playClipboard: () => Promise<void>;
+  playSavedReading: (opts: AudioTextOptions) => Promise<void>;
 }
 
 interface PdfTextItem {
@@ -107,6 +109,7 @@ export class ObsidianBridgeImpl implements ObsidianBridge {
     private app: App,
     private audio: AudioStore,
     private settings: TTSPluginSettingsStore,
+    private progress?: ReadingProgress,
   ) {
     mobx.makeObservable(this, {
       active: mobx.observable.ref,
@@ -301,9 +304,10 @@ export class ObsidianBridgeImpl implements ObsidianBridge {
     if (tabElement) {
       const inner = tabElement.querySelector(".workspace-tab-header-inner");
       if (inner) {
-        inner.querySelector(".tts-tab-playing-icon")?.remove();
+        inner.querySelector(".aloud-ios-fork-tab-playing-icon")?.remove();
         const iconSpan = document.createElement("span");
-        iconSpan.className = "tts-tab-playing-icon";
+        iconSpan.className =
+          "tts-tab-playing-icon aloud-ios-fork-tab-playing-icon";
         this._playingIconRoot = createRoot(iconSpan);
         this._playingIconRoot.render(
           React.createElement(IsPlaying, {
@@ -399,6 +403,11 @@ export class ObsidianBridgeImpl implements ObsidianBridge {
         });
         new Notice("Failed to start audio");
       });
+  }
+
+  async playSavedReading(opts: AudioTextOptions): Promise<void> {
+    this._setActiveEditor();
+    await this.audio.startPlayer(opts);
   }
 
   playSelection(): void {
@@ -525,17 +534,18 @@ export class ObsidianBridgeImpl implements ObsidianBridge {
     const selection = editor.getRange(from, to);
     if (selection) {
       try {
-        player
-          .startPlayer({
-            text: selection,
-            filename:
-              [file?.path, file?.name].filter((x) => x).join("/") || "Untitled",
-            start,
-            end: start + selection.length,
-          })
-          .catch((ex) => {
-            console.error("Couldn't start player!", ex);
-          });
+        const opts: AudioTextOptions = {
+          text: selection,
+          filename:
+            [file?.path, file?.name].filter((x) => x).join("/") || "Untitled",
+          sourcePath: file?.path,
+          start,
+          end: start + selection.length,
+        };
+        opts.resumeChunkIndex = this.progress?.positionFor(opts);
+        player.startPlayer(opts).catch((ex) => {
+          console.error("Couldn't start player!", ex);
+        });
       } catch (ex) {
         console.error("Couldn't start player!", ex);
       }

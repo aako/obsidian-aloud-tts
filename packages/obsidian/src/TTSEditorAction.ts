@@ -10,7 +10,7 @@ import { TTSActions, createTTSActions } from "open-tts";
 import { EditorActionIcon } from "@open-tts/ui";
 import { TTSControlMenuContent } from "./components/TTSControlMenu";
 
-const EDITOR_ACTION_ATTR = "data-aloud-action";
+const EDITOR_ACTION_ATTR = "data-aloud-ios-fork-action";
 
 type SinkWithElement = AudioSink & { audioElement?: HTMLAudioElement };
 

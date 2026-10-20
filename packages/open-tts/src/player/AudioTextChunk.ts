@@ -16,6 +16,8 @@ export interface AudioTextOptions {
   end: number;
   // minimum chunk length before merging with the next (e.g. short sentences are added to the next sentence)
   minChunkLength?: number;
+  sourcePath?: string;
+  resumeChunkIndex?: number;
 }
 
 /** Container for lazily loaded TTS that's text has been chunked for faster streaming of output and seeking of position by chunk */
@@ -24,6 +26,10 @@ export interface AudioText {
   filename: string;
   friendlyName: string;
   created: number;
+  sourcePath?: string;
+  sourceStart?: number;
+  sourceEnd?: number;
+  sourceFingerprint?: string;
   chunks: AudioTextChunk[];
 }
 

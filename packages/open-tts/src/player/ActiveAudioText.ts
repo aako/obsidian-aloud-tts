@@ -1,5 +1,6 @@
 import * as mobx from "mobx";
 import { action, computed, observable } from "mobx";
+import { readingFingerprint } from "./ReadingFingerprint";
 import { randomId, splitParagraphs, splitSentences } from "../util/misc";
 import { AudioSystem } from "./AudioSystem";
 import { ChunkPlayer } from "./ChunkPlayer";
@@ -78,9 +79,13 @@ export class ActiveAudioTextImpl implements ActiveAudioText {
     return error;
   }
 
-  constructor(audio: AudioText, system: AudioSystem) {
+  constructor(audio: AudioText, system: AudioSystem, startPosition = 0) {
     this.audio = audio;
     this.system = system;
+    this.position = Math.max(
+      0,
+      Math.min(startPosition, audio.chunks.length - 1),
+    );
 
     this.queue = new ChunkPlayer({
       activeAudioText: this,
@@ -192,6 +197,10 @@ export function buildTrack(
       splits[0].slice(0, 20) +
       (splits[0].length > 20 ? "..." : ""),
     created: new Date().valueOf(),
+    sourcePath: opts.sourcePath,
+    sourceStart: opts.start,
+    sourceEnd: opts.end,
+    sourceFingerprint: readingFingerprint(opts.text),
     chunks: chunks,
   });
 }
