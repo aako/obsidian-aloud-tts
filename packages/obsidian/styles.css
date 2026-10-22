@@ -550,3 +550,17 @@ details[open] .tts-error-details {
   margin: 0 12px 8px;
   accent-color: var(--interactive-accent);
 }
+
+/* Anchored Aloud desktop controls: never turn desktop into the mobile sheet. */
+.menu.tts-desktop-controls {
+  position: fixed;
+  bottom: auto;
+  right: auto;
+  transform: none;
+  overflow-y: auto;
+  z-index: 1001;
+}
+
+.tts-desktop-controls .menu-grabber {
+  display: none;
+}

@@ -19,6 +19,7 @@ export const createMockObsidianBridge = () => ({
   detachedAudio: false,
   triggerSelection: vi.fn(),
   playSelection: vi.fn(),
+  playDocument: vi.fn(),
   playDetached: vi.fn(),
   playClipboard: vi.fn(),
   playSavedReading: vi.fn(),

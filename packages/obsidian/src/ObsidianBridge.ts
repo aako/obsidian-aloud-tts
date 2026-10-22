@@ -37,6 +37,7 @@ export interface ObsidianBridge
   ) => void;
   playDetached: (text: string, filename?: string) => void;
   playSelection: () => void;
+  playDocument(): Promise<void>;
   playClipboard: () => Promise<void>;
   playSavedReading: (opts: AudioTextOptions) => Promise<void>;
   hasSavedReading(): boolean;
@@ -552,6 +553,31 @@ export class ObsidianBridgeImpl implements ObsidianBridge {
       this.triggerSelection(focused.file, focused.editor);
     } else {
       new Notice("Focus a file or select some text first to play");
+    }
+  }
+
+  async playDocument(): Promise<void> {
+    const view =
+      this.focusedEditorView ??
+      this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (!view?.editor) {
+      new Notice("Focus a note first to play the complete document.");
+      return;
+    }
+    const text = view.editor.getValue();
+    if (!text.trim()) return;
+    try {
+      await this.playSavedReading({
+        text,
+        filename: view.file?.path ?? "Untitled",
+        sourcePath: view.file?.path,
+        start: 0,
+        end: text.length,
+        resumeChunkIndex: 0,
+      });
+    } catch (error) {
+      console.warn("Aloud: document playback failed", error);
+      new Notice("Couldn't start document playback.");
     }
   }
 

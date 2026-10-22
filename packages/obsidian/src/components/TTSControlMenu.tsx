@@ -32,6 +32,7 @@ export const TTSControlMenuContent = observer(
     settings,
     bridge,
     onClose,
+    showRestartFromCursor = true,
     showAutoscroll = true,
   }: TTSControlMenuProps): React.ReactElement => {
     const active = player.activeText;
@@ -108,6 +109,33 @@ export const TTSControlMenuContent = observer(
               />
             </div>
           </div>
+
+          {showRestartFromCursor && (
+            <div className="menu-group">
+              <button
+                type="button"
+                className="menu-item tappable"
+                onClick={() => {
+                  onClose();
+                  actions.playSelection();
+                }}
+              >
+                Play Selection / From Cursor
+              </button>
+              {bridge && (
+                <button
+                  type="button"
+                  className="menu-item tappable"
+                  onClick={() => {
+                    onClose();
+                    void bridge.playDocument();
+                  }}
+                >
+                  Play Entire Document
+                </button>
+              )}
+            </div>
+          )}
 
           {(bridge?.hasSavedReading() || active) && (
             <>
