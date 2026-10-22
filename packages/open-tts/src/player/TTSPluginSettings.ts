@@ -15,6 +15,7 @@ export type TTSPluginSettings = {
   persistentCacheFolder: string;
   persistentCacheMaxMB: number;
   azureMonthlyBudget: number;
+  googleChirpMonthlyBudget: number;
   showPlayerView: PlayerViewMode;
   showEditorActionButton: boolean;
   autoScrollPlayerView: boolean;
@@ -30,7 +31,8 @@ export type TTSPluginSettings = {
   MinimaxModelConfig &
   FishModelConfig &
   InworldModelConfig &
-  PollyModelConfig);
+  PollyModelConfig &
+  GoogleChirpModelConfig);
 
 export interface InworldModelConfig {
   /** the API key to use */
@@ -103,6 +105,12 @@ export interface ElevenLabsModelConfig {
   elevenlabs_stability?: number;
   /** voice similarity boost setting (0-1) */
   elevenlabs_similarity?: number;
+}
+
+export interface GoogleChirpModelConfig {
+  googleChirpApiKey: string;
+  googleChirpVoice: string;
+  googleChirpFavoriteVoices: string[];
 }
 
 export interface AzureModelConfig {
@@ -200,6 +208,7 @@ export const modelProviders = [
   "openai",
   "openaicompat",
   "azure",
+  "google_chirp",
   "elevenlabs",
   "gemini",
   "hume",
@@ -219,6 +228,10 @@ export const DEFAULT_SETTINGS: TTSPluginSettings = {
   persistentCacheFolder: "_Aloud Audio Cache",
   persistentCacheMaxMB: 1024,
   azureMonthlyBudget: 450000,
+  googleChirpMonthlyBudget: 900000,
+  googleChirpApiKey: "",
+  googleChirpVoice: "en-US-Chirp3-HD-Aoede",
+  googleChirpFavoriteVoices: [],
   showPlayerView: "always-mobile",
   showEditorActionButton: true,
   autoScrollPlayerView: true,

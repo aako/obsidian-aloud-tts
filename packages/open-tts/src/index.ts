@@ -1,6 +1,7 @@
 export * from "./marketing";
 export * from "./models/azure";
 export * from "./models/AzureRequestGate";
+export * from "./models/google-chirp";
 export * from "./models/elevenlabs";
 export * from "./models/fish";
 export * from "./models/gemini";

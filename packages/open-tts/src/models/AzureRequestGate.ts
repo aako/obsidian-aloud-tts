@@ -51,6 +51,7 @@ export function validAzureLedger(value: unknown): value is AzureLedger {
 }
 
 export class AzureRequestGate {
+  constructor(private readonly serviceName = "Azure") {}
   ledger: AzureLedger = {
     month: currentMonth(),
     characters: 0,
@@ -97,7 +98,7 @@ export class AzureRequestGate {
     if (!this.initialized) {
       return Promise.reject(
         new Error(
-          "Azure usage ledger is unavailable; refusing a potentially billable request.",
+          `${this.serviceName} usage ledger is unavailable; refusing a potentially billable request.`,
         ),
       );
     }
@@ -207,7 +208,7 @@ export class AzureRequestGate {
         (error: unknown) => {
           this.initialized = false;
           const stopped = new Error(
-            "Azure usage ledger failed; synthesis disabled until plugin restart.",
+            `${this.serviceName} usage ledger failed; synthesis disabled until plugin restart.`,
           );
           for (const queued of this.queue.splice(0))
             this.finish(queued, stopped);

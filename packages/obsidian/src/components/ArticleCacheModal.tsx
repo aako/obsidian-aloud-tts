@@ -2,7 +2,11 @@ import * as React from "react";
 import { createRoot, Root } from "react-dom/client";
 import { observer } from "mobx-react-lite";
 import { App, Modal } from "obsidian";
-import { TTSPluginSettingsStore, azureRequestGate } from "open-tts";
+import {
+  TTSPluginSettingsStore,
+  azureRequestGate,
+  googleChirpRequestGate,
+} from "open-tts";
 import { ArticleCache, ArticleJob, CacheEstimate } from "../ArticleCache";
 import { cacheFolder } from "../PersistentVaultCache";
 
@@ -13,6 +17,7 @@ export class ArticleCacheModal extends Modal {
     private manager: ArticleCache,
     private settings: TTSPluginSettingsStore,
     private selected?: ArticleJob,
+    private onListen?: (job: ArticleJob) => Promise<void>,
   ) {
     super(app);
   }
@@ -24,6 +29,7 @@ export class ArticleCacheModal extends Modal {
         manager={this.manager}
         settings={this.settings}
         initial={this.selected}
+        onListen={this.onListen}
       />,
     );
   }
@@ -37,10 +43,12 @@ export const ArticleCacheView = observer(
     manager,
     settings,
     initial,
+    onListen,
   }: {
     manager: ArticleCache;
     settings: TTSPluginSettingsStore;
     initial?: ArticleJob;
+    onListen?: (job: ArticleJob) => Promise<void>;
   }): React.ReactElement => {
     const [id, setId] = React.useState(
       initial?.id ?? manager.jobs[0]?.id ?? "",
@@ -50,12 +58,18 @@ export const ArticleCacheView = observer(
     const [consent, setConsent] = React.useState(false);
     const [confirmDelete, setConfirmDelete] = React.useState(false);
     const [error, setError] = React.useState("");
+    const [exportMessage, setExportMessage] = React.useState("");
     const [bytes, setBytes] = React.useState(0);
     const [folder, setFolder] = React.useState(
       settings.settings.persistentCacheFolder,
     );
+    const google = settings.settings.modelProvider === "google_chirp";
+    const serviceName = google ? "Google Chirp" : "Azure";
+    const serviceGate = google ? googleChirpRequestGate : azureRequestGate;
     const [budget, setBudget] = React.useState(
-      settings.settings.azureMonthlyBudget,
+      google
+        ? settings.settings.googleChirpMonthlyBudget
+        : settings.settings.azureMonthlyBudget,
     );
     const [limit, setLimit] = React.useState(
       settings.settings.persistentCacheMaxMB,
@@ -115,24 +129,22 @@ export const ArticleCacheView = observer(
               <p>
                 {estimate.characters.toLocaleString()} characters ·{" "}
                 {estimate.cached} cached · {estimate.missing} missing ·
-                approximately {estimate.requests} new Azure requests before
-                retries · {estimate.additionalCharacters.toLocaleString()}{" "}
-                additional characters · about{" "}
+                approximately {estimate.requests} new {serviceName} requests
+                before retries ·{" "}
+                {estimate.additionalCharacters.toLocaleString()} additional
+                characters · about{" "}
                 {(estimate.approximateBytes / 1048576).toFixed(1)} MB. Audio
                 size is a rough 96 kbps speech estimate; voice and format vary.
               </p>
             )}
             <p>
               Locally tracked this UTC month:{" "}
-              {azureRequestGate.used.toLocaleString()} characters. Estimated
-              remaining local allowance:{" "}
-              {Math.max(
-                0,
-                settings.settings.azureMonthlyBudget - azureRequestGate.used,
-              ).toLocaleString()}
-              . This is not Azure billing; requests on other devices/apps and
-              prior usage are unknown. Attempts and retries are counted
-              conservatively. Generate on one device at a time.
+              {serviceGate.used.toLocaleString()} {serviceName} characters.
+              Estimated remaining local allowance:{" "}
+              {Math.max(0, budget - serviceGate.used).toLocaleString()}. This is
+              not Azure billing; requests on other devices/apps and prior usage
+              are unknown. Attempts and retries are counted conservatively.
+              Generate on one device at a time.
             </p>
             {estimate?.exceedsBudget && (
               <label>
@@ -150,6 +162,29 @@ export const ArticleCacheView = observer(
               </label>
             )}
             <div className="tts-cache-actions">
+              {onListen && (
+                <button type="button" onClick={() => run(() => onListen(job))}>
+                  Listen Now (play from start)
+                </button>
+              )}
+              {job.state === "complete" && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    run(async () => {
+                      const path = await manager.exportNativeAudio(
+                        job,
+                        settings.settings.audioFolder,
+                      );
+                      setExportMessage(
+                        `Exported multipart MP3 ZIP to ${path}. Import it from Files into BookPlayer or another native audiobook app. No synthesis requested.`,
+                      );
+                    })
+                  }
+                >
+                  Export cached audio ZIP (native player)
+                </button>
+              )}
               <button
                 disabled={
                   !estimate ||
@@ -214,7 +249,7 @@ export const ArticleCacheView = observer(
           />
         </label>
         <label>
-          Local Monthly Azure Character Budget{" "}
+          Local Monthly {serviceName} Character Budget{" "}
           <input
             type="number"
             min="0"
@@ -246,7 +281,12 @@ export const ArticleCacheView = observer(
               await settings.updateSettings({
                 persistentCacheFolder: next,
                 persistentCacheMaxMB: limit,
-                azureMonthlyBudget: budget,
+                azureMonthlyBudget: google
+                  ? settings.settings.azureMonthlyBudget
+                  : budget,
+                googleChirpMonthlyBudget: google
+                  ? budget
+                  : settings.settings.googleChirpMonthlyBudget,
               });
               await manager.load();
               setId(manager.jobs[0]?.id ?? "");
@@ -257,6 +297,7 @@ export const ArticleCacheView = observer(
           Save Cache Settings
         </button>
         {error && <p role="alert">{error}</p>}
+        {exportMessage && <p role="status">{exportMessage}</p>}
       </div>
     );
   },

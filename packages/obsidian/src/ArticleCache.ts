@@ -1,10 +1,13 @@
 import * as mobx from "mobx";
+import { zippedMP3Chunks } from "./CachedAudioZip";
 import {
   AudioSystem,
   AudioTextOptions,
   ChunkLoader,
   azureCharacters,
   azureRequestGate,
+  googleChirpRequestGate,
+  googleChirpCharacters,
   buildTrack,
   hashAudioInputs,
   readingFingerprint,
@@ -14,6 +17,7 @@ import {
   PersistentVaultCache,
   ensureFolder,
   readSnapshot,
+  cacheFolder,
   writeSnapshot,
 } from "./PersistentVaultCache";
 
@@ -139,6 +143,67 @@ export class ArticleCache {
     };
   }
 
+  /** Validate the exact note and voice before starting playback or export. */
+  playbackOptions(job: ArticleJob): Promise<AudioTextOptions> {
+    return this.options(job);
+  }
+
+  /** Export only verified cached bytes. Absolutely no network synthesis requests. */
+  async exportNativeAudio(job: ArticleJob, directory: string): Promise<string> {
+    if (job.state !== "complete")
+      throw new Error("Finish caching all chunks before exporting.");
+    const options = await this.options(job);
+    const chunks = buildTrack(options, job.chunkType).chunks;
+    if (job.chunks.length !== chunks.length)
+      throw new Error("Article chunk structure has changed.");
+    const voiceOptions = this.system.ttsModel.convertToOptions(
+      this.system.settings,
+    );
+    const parts: ArrayBuffer[] = [];
+    for (const [index, chunk] of chunks.entries()) {
+      if (
+        job.chunks[index].key !==
+        hashAudioInputs(chunk.text, voiceOptions, "mp3")
+      )
+        throw new Error(
+          "The cached voice or chunk identity changed. No export written.",
+        );
+      const cached = await this.vault.getAudio(chunk.text, voiceOptions, "mp3");
+      if (!cached)
+        throw new Error(
+          "One or more chunks are not fully available offline. No export written.",
+        );
+      parts.push(cached.data);
+    }
+    // Preserve independently encoded MP3 files; do not concatenate MP3 bitstreams.
+    const zipped = zippedMP3Chunks(parts);
+    const folder = cacheFolder(directory);
+    const name =
+      (job.path.split("/").pop() ?? "Article")
+        .replace(/\.md$/i, "")
+        .replace(/[^a-zA-Z0-9_-]/g, "-")
+        .slice(0, 70) || "Article";
+    const target = `${folder}/${name}-${job.id}-cached-audio.zip`;
+    if (await this.vault.adapter.exists(target))
+      throw new Error(
+        "A cached export with this name already exists; nothing was overwritten.",
+      );
+    await ensureFolder(this.vault.adapter, folder);
+    const temp = `${target}.${crypto.randomUUID()}.tmp`;
+    try {
+      await this.vault.adapter.writeBinary(temp, zipped);
+      const stat = await this.vault.adapter.stat(temp);
+      if (stat?.size !== zipped.byteLength)
+        throw new Error("Cached MP3 export write verification failed.");
+      await this.vault.adapter.rename(temp, target);
+    } catch (error) {
+      if (await this.vault.adapter.exists(temp))
+        await this.vault.adapter.remove(temp);
+      throw error;
+    }
+    return target;
+  }
+
   private voice(): string {
     return `${this.system.settings.modelProvider}:${voiceHash(this.system.ttsModel.convertToOptions(this.system.settings))}`;
   }
@@ -200,7 +265,10 @@ export class ArticleCache {
       bytes = 0;
     const missingKeys = new Set<string>();
     for (const [index, chunk] of chunks.entries()) {
-      const count = azureCharacters(chunk.text);
+      const count =
+        this.system.settings.modelProvider === "google_chirp"
+          ? googleChirpCharacters(chunk.text)
+          : azureCharacters(chunk.text);
       characters += count;
       const audio = await this.system.storage.getAudio(
         chunk.text,
@@ -215,20 +283,22 @@ export class ArticleCache {
         missingKeys.add(job.chunks[index].key);
       }
     }
-    const remaining = Math.max(
-      0,
-      this.system.settings.azureMonthlyBudget - azureRequestGate.used,
-    );
+    const google = this.system.settings.modelProvider === "google_chirp";
     const azure = this.system.settings.modelProvider === "azure";
+    const gate = google ? googleChirpRequestGate : azureRequestGate;
+    const budget = google
+      ? this.system.settings.googleChirpMonthlyBudget
+      : this.system.settings.azureMonthlyBudget;
+    const remaining = Math.max(0, budget - gate.used);
     return {
       characters,
       cached,
       missing: chunks.length - cached,
-      requests: azure ? missingKeys.size : 0,
+      requests: azure || google ? missingKeys.size : 0,
       additionalCharacters,
       approximateBytes: bytes + additionalCharacters * 800,
       remaining,
-      exceedsBudget: azure && additionalCharacters > remaining,
+      exceedsBudget: (azure || google) && additionalCharacters > remaining,
     };
   }
 
@@ -248,12 +318,14 @@ export class ArticleCache {
         this.system.settings,
       );
       const chunks = buildTrack(await this.options(job), job.chunkType).chunks;
-      const limit = consent
-        ? Math.max(
-            this.system.settings.azureMonthlyBudget,
-            azureRequestGate.used + estimate.additionalCharacters,
-          )
+      const google = this.system.settings.modelProvider === "google_chirp";
+      const gate = google ? googleChirpRequestGate : azureRequestGate;
+      const budget = google
+        ? this.system.settings.googleChirpMonthlyBudget
         : this.system.settings.azureMonthlyBudget;
+      const limit = consent
+        ? Math.max(budget, gate.used + estimate.additionalCharacters)
+        : budget;
       mobx.runInAction(() => {
         job.state = "running";
         job.message = "Generating missing chunks.";

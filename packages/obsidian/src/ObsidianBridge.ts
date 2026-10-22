@@ -20,7 +20,7 @@ import { TTSPluginSettingsStore } from "open-tts";
 import { TTSEditorBridge } from "@open-tts/ui";
 import { readingFingerprint } from "./ReadingProgress";
 import type { ReadingProgress } from "./ReadingProgress";
-import type { ArticleCache } from "./ArticleCache";
+import type { ArticleCache, ArticleJob } from "./ArticleCache";
 import { ArticleCacheModal } from "./components/ArticleCacheModal";
 
 export interface ObsidianBridgeSpecifics {
@@ -627,6 +627,13 @@ export class ObsidianBridgeImpl implements ObsidianBridge {
         this.articleCache,
         this.settings,
         job,
+        async (selected: ArticleJob) => {
+          if (!this.articleCache)
+            throw new Error("Cache manager is unavailable.");
+          await this.playSavedReading(
+            await this.articleCache.playbackOptions(selected),
+          );
+        },
       ).open();
     } catch (error) {
       new Notice(

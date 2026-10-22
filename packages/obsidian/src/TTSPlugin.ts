@@ -10,7 +10,11 @@ import {
   readSnapshot,
   writeSnapshot,
 } from "./PersistentVaultCache";
-import { azureRequestGate, validAzureLedger } from "open-tts";
+import {
+  azureRequestGate,
+  validAzureLedger,
+  googleChirpRequestGate,
+} from "open-tts";
 import { AloudMediaSession } from "./MediaSessionController";
 import { REGISTRY } from "open-tts";
 import { TTSSettingTab } from "./components/TTSPluginSettingsTab";
@@ -345,6 +349,37 @@ export default class TTSPlugin extends Plugin {
       );
       new Notice(
         "Aloud: Azure usage ledger unavailable. Azure generation is disabled; cached audio can still play.",
+      );
+    }
+    // Separate durable local ledger: Chirp use must never share Azure's budget.
+    const googleLedgerBase = `${ledgerFolder}/google-chirp-usage`;
+    try {
+      const saved = await readSnapshot(
+        adapter,
+        googleLedgerBase,
+        validAzureLedger,
+      );
+      let generation = saved?.generation ?? 0;
+      googleChirpRequestGate.initialize(
+        saved?.value ?? {
+          month: new Date().toISOString().slice(0, 7),
+          characters: 0,
+          starts: [],
+          blockedUntil: 0,
+        },
+        async (value) => {
+          await ensureFolder(adapter, ledgerFolder);
+          await writeSnapshot(adapter, googleLedgerBase, ++generation, value);
+          await writeSnapshot(adapter, googleLedgerBase, ++generation, value);
+        },
+      );
+    } catch (error) {
+      console.error(
+        "Aloud: Google Chirp ledger unavailable; synthesis disabled",
+        error,
+      );
+      new Notice(
+        "Aloud: Google Chirp ledger unavailable. Google synthesis is disabled; cached audio can still play.",
       );
     }
     const persistent = new PersistentVaultCache(
