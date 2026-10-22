@@ -172,7 +172,7 @@ export class TTSEditorAction {
     }
 
     // Mobile phones: play if idle, show menu if active
-    if (!this.player.activeText) {
+    if (!this.player.activeText && !this.bridge.hasSavedReading()) {
       this.actions.playSelection();
       return;
     }
@@ -207,6 +207,7 @@ export class TTSEditorAction {
         actions: this.actions,
         player: this.player,
         settings: this.settings,
+        bridge: this.bridge,
         onClose: () => this.closeMenu(),
       }),
     );

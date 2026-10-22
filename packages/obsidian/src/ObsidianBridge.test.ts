@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { FileView, loadPdfJs, Notice } from "obsidian";
+import { App, FileView, loadPdfJs, Notice, TFile } from "obsidian";
 import { ObsidianBridgeImpl } from "./ObsidianBridge";
 import { createTestAudioStore, createTestSettingsStore } from "./test-utils";
 
@@ -72,6 +72,76 @@ vi.mock("obsidian", () => ({
 }));
 
 describe("ObsidianBridge", () => {
+  it.each([false, true])(
+    "starts over inside the first chunk (detached: %s)",
+    async (detached: boolean) => {
+      const text =
+        "The first sentence is long enough. The second sentence follows it.";
+      const file = Object.assign(new TFile(), { path: "Book.md" });
+      const app = {
+        workspace: { on: vi.fn(), off: vi.fn(), getActiveViewOfType: vi.fn() },
+        vault: {
+          getAbstractFileByPath: vi.fn(() => file),
+          read: vi.fn(async (): Promise<string> => text),
+        },
+      } as unknown as App;
+      const player = createTestAudioStore();
+      const settings = await createTestSettingsStore();
+      const bridge = new ObsidianBridgeImpl(app, player, settings);
+      const old = await player.startPlayer({
+        text,
+        filename: detached ? "Book.pdf" : file.path,
+        sourcePath: detached ? undefined : file.path,
+        start: 0,
+        end: text.length,
+      });
+      expect(old.position).toBe(0);
+      const start = vi.spyOn(player, "startPlayer");
+      await bridge.startOver();
+      await vi.waitFor(() => expect(player.activeText).not.toBe(old));
+      expect(start).toHaveBeenCalledOnce();
+      expect(player.activeText?.position).toBe(0);
+      expect(player.activeText?.audio.chunks[0].rawText).toBe(
+        old.audio.chunks[0].rawText,
+      );
+      expect(bridge.detachedAudio).toBe(detached);
+      bridge.destroy();
+      player.destroy();
+    },
+  );
+
+  it("reports a failed saved-note read without rejecting the UI action", async () => {
+    const text = "The first sentence is long enough.";
+    const file = Object.assign(new TFile(), { path: "Book.md" });
+    const app = {
+      workspace: { on: vi.fn(), off: vi.fn(), getActiveViewOfType: vi.fn() },
+      vault: {
+        getAbstractFileByPath: vi.fn(() => file),
+        read: vi.fn().mockRejectedValue(new Error("unavailable")),
+      },
+    } as unknown as App;
+    const player = createTestAudioStore();
+    const bridge = new ObsidianBridgeImpl(
+      app,
+      player,
+      await createTestSettingsStore(),
+    );
+    const old = await player.startPlayer({
+      text,
+      filename: file.path,
+      sourcePath: file.path,
+      start: 0,
+      end: text.length,
+    });
+    await expect(bridge.startOver()).resolves.toBeUndefined();
+    expect(player.activeText).toBe(old);
+    expect(Notice).toHaveBeenCalledWith(
+      "Couldn't restart reading. Check vault access and try again.",
+    );
+    bridge.destroy();
+    player.destroy();
+  });
+
   describe("ObsidianBridgeImpl", () => {
     it("should instantiate without crashing", async () => {
       const mockApp = {

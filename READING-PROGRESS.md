@@ -9,8 +9,10 @@ A checkpoint contains the note path, selection boundaries, compact text hash,
 chunk index, and sentence-anchor hash; it does not contain article text or credentials.
 Progress is saved when the spoken chunk changes, on a pause, every three seconds
 (when the position changes), and when iOS hides the app. On resume the checkpoint
-is intentionally one chunk behind the last observed position. Replaying a short
-sentence is safer than skipping unspoken text.
+is intentionally one chunk behind the last observed position, but never behind
+the current session's initial resume boundary unless Previous explicitly moves
+backward. Repeated resume/pause cycles therefore do not drift backward.
+Replaying a short sentence is safer than skipping unspoken text.
 
 To resume, either replay the identical selection or use the Command Palette's
 **Aloud (iOS Fork): Resume last reading (saved progress)**. If the source note has

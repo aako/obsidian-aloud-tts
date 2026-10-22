@@ -63,7 +63,7 @@ export function createTTSActions(
     },
 
     stop(): void {
-      player.destroy();
+      player.closePlayer();
     },
 
     next(): void {

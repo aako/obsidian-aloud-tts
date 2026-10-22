@@ -148,6 +148,14 @@ describe("durable progress", () => {
     );
     await restored.load();
     expect(restored.positionFor(opts)).toBe(1);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      mobx.runInAction(() => {
+        track.position = restored.positionFor(opts)!;
+      });
+      restored.start();
+      await restored.stop();
+      expect(restored.positionFor(opts)).toBe(1);
+    }
     // Corrupt the latest slot; the prior generation must remain recoverable.
     const keys = [...storage.keys()];
     const snapshots = keys.map((key) => ({

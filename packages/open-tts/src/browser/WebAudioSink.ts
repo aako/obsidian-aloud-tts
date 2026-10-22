@@ -15,6 +15,16 @@ export class WebAudioSink implements AudioSink {
   private _sourceBuffer: SourceBuffer;
   private _objectUrl: string | undefined;
   _isPlaying = false;
+  onPlaybackFailure?: (error: unknown) => void;
+  private playGeneration = 0;
+  private playPending = false;
+  private mediaQueue: Promise<void> = Promise.resolve();
+
+  private enqueueMedia(operation: () => Promise<void>): Promise<void> {
+    const pending = this.mediaQueue.then(operation);
+    this.mediaQueue = pending.catch(() => undefined);
+    return pending;
+  }
 
   get audioElement(): HTMLAudioElement {
     return this._audio;
@@ -89,6 +99,16 @@ export class WebAudioSink implements AudioSink {
     this._audio.addEventListener("play", this._onplay);
     this._audio.addEventListener("pause", this._onpause);
     this._audio.addEventListener("seeked", this._onseeked);
+    for (const event of [
+      "playing",
+      "waiting",
+      "stalled",
+      "emptied",
+      "ended",
+      "error",
+    ]) {
+      this._audio.addEventListener(event, this._onMediaLifecycle);
+    }
   }
 
   seek(seconds: number = 1): void {
@@ -126,11 +146,9 @@ export class WebAudioSink implements AudioSink {
     } else {
       this._lastActivePlayPosition = position;
     }
+    if (this._audio.paused) return "paused";
     if (duration && position >= duration - safeMargin) {
       return "complete";
-    }
-    if (this._audio.paused) {
-      return "paused";
     }
     return "playing";
   }
@@ -139,7 +157,11 @@ export class WebAudioSink implements AudioSink {
     this._trackStatus = this.getTrackStatus();
   }
 
-  async switchMedia(data: ArrayBuffer): Promise<void> {
+  switchMedia(data: ArrayBuffer): Promise<void> {
+    return this.enqueueMedia(() => this.switchMediaNow(data));
+  }
+
+  private async switchMediaNow(data: ArrayBuffer): Promise<void> {
     await onceBuffUpdateEnd(this._sourceBuffer);
     const buffered = this._sourceBuffer.buffered;
     if (buffered.length > 0) {
@@ -156,7 +178,11 @@ export class WebAudioSink implements AudioSink {
     this._updateTrackStatus();
   }
 
-  async appendMedia(data: ArrayBuffer): Promise<void> {
+  appendMedia(data: ArrayBuffer): Promise<void> {
+    return this.enqueueMedia(() => this.appendMediaNow(data));
+  }
+
+  private async appendMediaNow(data: ArrayBuffer): Promise<void> {
     await onceBuffUpdateEnd(this._sourceBuffer);
     const buffered = this._sourceBuffer.buffered;
     if (buffered.length > 0) {
@@ -196,7 +222,12 @@ export class WebAudioSink implements AudioSink {
     this._audio.pause();
   }
 
-  async clearMedia(): Promise<void> {
+  clearMedia(): Promise<void> {
+    return this.enqueueMedia(() => this.clearMediaNow());
+  }
+
+  private async clearMediaNow(): Promise<void> {
+    await onceBuffUpdateEnd(this._sourceBuffer);
     if (this._sourceBuffer.buffered.length > 0) {
       const wasZero = this._audio.currentTime === 0;
       let seekComplete: CancellablePromise<void> | undefined;
@@ -210,7 +241,10 @@ export class WebAudioSink implements AudioSink {
           ).thenCancellable(() => undefined);
         }
       }
-      this._sourceBuffer.remove(0, this._sourceBuffer.buffered.end(0));
+      this._sourceBuffer.remove(
+        0,
+        this._sourceBuffer.buffered.end(this._sourceBuffer.buffered.length - 1),
+      );
       await onceBuffUpdateEnd(this._sourceBuffer);
       this._sourceBuffer.timestampOffset = 0;
       await onceBuffUpdateEnd(this._sourceBuffer);
@@ -222,10 +256,37 @@ export class WebAudioSink implements AudioSink {
       }
       this._updateTrackStatus();
     }
+    this._sourceBuffer.timestampOffset = 0;
+    this._audio.currentTime = 0;
   }
 
   play(): void {
-    this._audio.play();
+    if (this.playPending || this._isPlaying) return;
+    this.playPending = true;
+    const generation = ++this.playGeneration;
+    try {
+      void this._audio
+        .play()
+        .then(() => {
+          if (generation === this.playGeneration) this.playPending = false;
+        })
+        .catch((error: unknown) => {
+          if (generation !== this.playGeneration) return;
+          this.playPending = false;
+          mobx.runInAction(() => {
+            this._isPlaying = false;
+            this._updateTrackStatus();
+          });
+          this.onPlaybackFailure?.(error);
+        });
+    } catch (error) {
+      this.playPending = false;
+      mobx.runInAction(() => {
+        this._isPlaying = false;
+        this._updateTrackStatus();
+      });
+      this.onPlaybackFailure?.(error);
+    }
   }
 
   private loopCheckCompletion(): void {
@@ -252,7 +313,10 @@ export class WebAudioSink implements AudioSink {
   }
 
   pause(): void {
+    ++this.playGeneration;
+    this.playPending = false;
     this._audio.pause();
+    this._onpause();
   }
 
   _onplay = (): void => {
@@ -262,9 +326,32 @@ export class WebAudioSink implements AudioSink {
   };
 
   _onpause = (): void => {
+    ++this.playGeneration;
+    this.playPending = false;
     this._updateTrackStatus();
     clearInterval(this._completionChecker);
     this._isPlaying = false;
+  };
+
+  private _onMediaLifecycle = (event: Event): void => {
+    if (event.type === "error" || event.type === "emptied") {
+      mobx.runInAction(() => {
+        this._isPlaying = false;
+        this._updateTrackStatus();
+      });
+    }
+    if (event.type === "playing") this._updateTrackStatus();
+    if (event.type === "error") {
+      this.onPlaybackFailure?.(
+        this._audio.error ?? new Error("Media element error"),
+      );
+    }
+    if (["stalled", "error", "emptied"].includes(event.type)) {
+      console.debug("Aloud audio lifecycle", {
+        event: event.type,
+        hidden: document.hidden,
+      });
+    }
   };
 
   _onseeked = (): void => {
@@ -287,10 +374,22 @@ export class WebAudioSink implements AudioSink {
   }
 
   destroy(): void {
+    ++this.playGeneration;
+    this.playPending = false;
     clearTimeout(this._completionChecker);
     this._audio.removeEventListener("play", this._onplay);
     this._audio.removeEventListener("pause", this._onpause);
     this._audio.removeEventListener("seeked", this._onseeked);
+    for (const event of [
+      "playing",
+      "waiting",
+      "stalled",
+      "emptied",
+      "ended",
+      "error",
+    ]) {
+      this._audio.removeEventListener(event, this._onMediaLifecycle);
+    }
     this._audio.pause();
     try {
       if (this._sourceBuffer.buffered.length > 0) {

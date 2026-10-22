@@ -541,3 +541,12 @@ details[open] .tts-error-details {
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
+
+/* Sentence progress uses actual chunk counts, not estimated duration. */
+.tts-menu-progress {
+  display: block;
+  width: calc(100% - 24px);
+  height: 6px;
+  margin: 0 12px 8px;
+  accent-color: var(--interactive-accent);
+}

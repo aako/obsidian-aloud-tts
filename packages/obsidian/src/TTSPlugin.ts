@@ -1,8 +1,9 @@
 import { TTSCodeMirror } from "./TTSCodemirror";
 import { createPlayerSynchronizer } from "@open-tts/ui";
 
-import { MarkdownView, Plugin, TFile, Notice, addIcon } from "obsidian";
-import { ReadingProgress, readingFingerprint } from "./ReadingProgress";
+import { MarkdownView, Plugin, Notice, addIcon } from "obsidian";
+import { ReadingProgress } from "./ReadingProgress";
+import { AloudMediaSession } from "./MediaSessionController";
 import { REGISTRY } from "open-tts";
 import { TTSSettingTab } from "./components/TTSPluginSettingsTab";
 import { AudioSink } from "open-tts";
@@ -39,6 +40,7 @@ export default class TTSPlugin extends Plugin {
   detachedPlayerHost: DetachedPlayerHost | undefined;
   private _playerSyncDisposer: (() => void) | undefined;
   private progress: ReadingProgress;
+  private mediaSession?: AloudMediaSession;
 
   get player(): AudioStore {
     return this.system.audioStore;
@@ -125,7 +127,13 @@ export default class TTSPlugin extends Plugin {
     this.addCommand({
       id: "resume-last-reading",
       name: "Resume last reading (saved progress)",
-      callback: () => void this.resumeSavedReading(),
+      callback: () => void this.bridge.resumeSavedReading(),
+    });
+
+    this.addCommand({
+      id: "start-over",
+      name: "Start Over (first sentence)",
+      callback: () => void this.bridge.startOver(),
     });
 
     // Editor action button - always present, behavior differs by platform
@@ -270,6 +278,7 @@ export default class TTSPlugin extends Plugin {
 
   async onunload(): Promise<void> {
     await this.progress?.stop();
+    this.mediaSession?.destroy();
     this.detachedPlayerHost?.destroy();
     this.editorAction?.destroy();
     this._playerSyncDisposer?.();
@@ -279,43 +288,6 @@ export default class TTSPlugin extends Plugin {
     this.cache?.destroy();
   }
 
-  private async resumeSavedReading(): Promise<void> {
-    const saved = this.progress.latest;
-    if (!saved) {
-      new Notice("No saved reading progress yet.");
-      return;
-    }
-    const file = this.app.vault.getAbstractFileByPath(saved.path);
-    if (!(file instanceof TFile)) {
-      new Notice("Saved article no longer exists.");
-      return;
-    }
-    const fullText = await this.app.vault.read(file);
-    const selection = fullText.slice(saved.start, saved.end);
-    if (readingFingerprint(selection) !== saved.fingerprint) {
-      new Notice(
-        "Article changed since the checkpoint; refusing to skip text.",
-      );
-      return;
-    }
-    const opts = {
-      filename: [file.path, file.name].join("/"),
-      sourcePath: file.path,
-      text: selection,
-      start: saved.start,
-      end: saved.end,
-    };
-    const position = this.progress.positionFor(opts);
-    if (position == null) {
-      new Notice("Reading checkpoint no longer matches this article.");
-      return;
-    }
-    const leaf = this.app.workspace.getLeaf(false);
-    await leaf.openFile(file);
-    await this.bridge.playSavedReading({ ...opts, resumeChunkIndex: position });
-    new Notice("Resumed from a saved sentence boundary.");
-  }
-
   async loadSettings() {
     this.settings = await pluginSettingsStore(
       () => this.loadData(),
@@ -323,6 +295,16 @@ export default class TTSPlugin extends Plugin {
     );
 
     const audio = await WebAudioSink.create();
+    audio.onPlaybackFailure = (error: unknown): void => {
+      const name = error instanceof Error ? error.name : "UnknownError";
+      console.warn("Aloud audio: playback could not resume", {
+        name,
+        hidden: document.hidden,
+      });
+      new Notice(
+        "Audio couldn't resume. Return to Aloud and tap Continue or Resume saved article.",
+      );
+    };
     const cache = configurableAudioCache(this.app, this.settings);
     this.cache = cache;
     this.system = createAudioSystem({
@@ -351,6 +333,8 @@ export default class TTSPlugin extends Plugin {
       this.progress,
     );
     this.progress.start();
+    this.mediaSession = new AloudMediaSession(this.player, audio);
+    this.mediaSession.start();
   }
 }
 

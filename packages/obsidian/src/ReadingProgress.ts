@@ -109,6 +109,7 @@ export class ReadingProgress {
   private readonly files: [string, string];
   private state: ProgressSnapshot = emptyState();
   private active: ActiveAudioText | null = null;
+  private resumeFloor = 0;
   private disposeTrack?: mobx.IReactionDisposer;
   private disposeActive?: mobx.IReactionDisposer;
   private writeQueue: Promise<void> = Promise.resolve();
@@ -166,6 +167,7 @@ export class ReadingProgress {
     this.disposeTrack?.();
     this.disposeTrack = undefined;
     this.active = active;
+    this.resumeFloor = Math.max(0, active?.position ?? 0);
     if (active) {
       this.disposeTrack = mobx.reaction(
         () => [active.position, active.isPlaying],
@@ -189,13 +191,48 @@ export class ReadingProgress {
     );
   }
 
+  /** Reset a bookmark before replacing the player; never let the old track rewrite it. */
+  async resetToStart(opts: AudioTextOptions): Promise<void> {
+    const path = opts.sourcePath;
+    if (!path) return;
+    const chunks = buildTrack(opts, this.settings.settings.chunkType).chunks;
+    if (!chunks.length) return;
+    this.disposeTrack?.();
+    this.disposeTrack = undefined;
+    this.active = null; // An old-track reaction must not overwrite the reset.
+    const fingerprint = readingFingerprint(opts.text);
+    const key = readingKey(path, opts.start, opts.end, fingerprint);
+    this.state.readings[key] = {
+      path,
+      start: opts.start,
+      end: opts.end,
+      fingerprint,
+      chunk: 0,
+      anchor: readingFingerprint(chunks[0].rawText),
+      updatedAt: Date.now(),
+    };
+    this.state.latestKey = key;
+    this.trimReadings();
+    this.state.generation += 1;
+    const slot = this.files[this.state.generation % 2];
+    const payload = JSON.stringify(this.state);
+    // Queued behind any old writes, and awaited before playing new audio.
+    this.writeQueue = this.writeQueue.then(() =>
+      this.adapter.write(slot, payload),
+    );
+    const pending = this.writeQueue;
+    this.writeQueue = pending.catch(() => undefined);
+    await pending;
+  }
+
   private capture(force: boolean): void {
     const active = this.active;
     const audio = active?.audio;
     if (!active || !audio?.sourcePath || !audio.chunks.length) return;
     if (active.position < 0) return; // Keep prior checkpoint if ending falsely.
     const current = Math.min(active.position, audio.chunks.length - 1);
-    const conservative = Math.max(0, current - 1);
+    this.resumeFloor = Math.min(this.resumeFloor, current);
+    const conservative = Math.max(this.resumeFloor, current - 1);
     const chunk = audio.chunks[conservative];
     if (!chunk) return;
     const fingerprint = audio.sourceFingerprint;
@@ -221,6 +258,24 @@ export class ReadingProgress {
       updatedAt: Date.now(),
     };
     this.state.latestKey = key;
+    this.trimReadings();
+    this.state.generation += 1;
+    const slot = this.files[this.state.generation % 2];
+    const payload = JSON.stringify(this.state);
+    this.writeQueue = this.writeQueue
+      .then(() => this.adapter.write(slot, payload))
+      .catch((error: unknown) => {
+        console.error("Aloud progress: failed to save checkpoint", error);
+        if (!this.failed) {
+          this.failed = true;
+          new Notice(
+            "Aloud progress autosave failed; please check vault access.",
+          );
+        }
+      });
+  }
+
+  private trimReadings(): void {
     const ordered = Object.keys(this.state.readings)
       .sort(
         (a, b) =>
@@ -232,21 +287,6 @@ export class ReadingProgress {
       trimmed[recentKey] = this.state.readings[recentKey];
     }
     this.state.readings = trimmed;
-    this.state.generation += 1;
-    const slot = this.files[this.state.generation % 2];
-    const payload = JSON.stringify(this.state);
-    this.writeQueue = this.writeQueue
-      .then(() => this.adapter.write(slot, payload))
-      .catch((error: unknown) => {
-        console.error("Aloud progress: failed to save checkpoint", error);
-        if (!this.failed) {
-          this.failed = true;
-          // Do not claim durability if vault writes fail.
-          new Notice(
-            "Aloud progress autosave failed; please check vault access.",
-          );
-        }
-      });
   }
 
   async stop(): Promise<void> {

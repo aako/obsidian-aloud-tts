@@ -18,6 +18,7 @@ import { AudioStore, AudioTextOptions } from "open-tts";
 import { hashString } from "open-tts";
 import { TTSPluginSettingsStore } from "open-tts";
 import { TTSEditorBridge } from "@open-tts/ui";
+import { readingFingerprint } from "./ReadingProgress";
 import type { ReadingProgress } from "./ReadingProgress";
 
 export interface ObsidianBridgeSpecifics {
@@ -38,6 +39,10 @@ export interface ObsidianBridge
   playSelection: () => void;
   playClipboard: () => Promise<void>;
   playSavedReading: (opts: AudioTextOptions) => Promise<void>;
+  hasSavedReading(): boolean;
+  resumeSavedReading(): Promise<void>;
+  startOver(): Promise<void>;
+  readingProgressLabel(): string | undefined;
 }
 
 interface PdfTextItem {
@@ -76,6 +81,7 @@ type PdfFileView = {
 
 /** observable class for obsidian related implementation to activate audio */
 export class ObsidianBridgeImpl implements ObsidianBridge {
+  private readingActionPending = false;
   // the editor that was last interacted with for playing audio.
   active: MarkdownFileInfo | null = null;
   activeEditorView: MarkdownView | null;
@@ -408,6 +414,130 @@ export class ObsidianBridgeImpl implements ObsidianBridge {
   async playSavedReading(opts: AudioTextOptions): Promise<void> {
     this._setActiveEditor();
     await this.audio.startPlayer(opts);
+  }
+
+  hasSavedReading(): boolean {
+    return !!this.progress?.latest;
+  }
+
+  readingProgressLabel(): string | undefined {
+    const unit =
+      this.settings.settings.chunkType === "paragraph"
+        ? "paragraph"
+        : "sentence group";
+    const active = this.audio.activeText;
+    if (active && active.position >= 0) {
+      return `Live: ${unit} ${active.position + 1} of ${active.audio.chunks.length}`;
+    }
+    const saved = this.progress?.latest;
+    return saved ? `Saved: ${unit} ${saved.chunk + 1}` : undefined;
+  }
+
+  private async savedOptions(): Promise<AudioTextOptions | undefined> {
+    const saved = this.progress?.latest;
+    if (!saved) {
+      new Notice("No saved article yet.");
+      return undefined;
+    }
+    return this.optionsForSource(
+      saved.path,
+      saved.start,
+      saved.end,
+      saved.fingerprint,
+    );
+  }
+
+  private async optionsForSource(
+    path: string,
+    start: number,
+    end: number,
+    fingerprint: string,
+  ): Promise<AudioTextOptions | undefined> {
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!(file instanceof TFile)) {
+      new Notice("Saved article no longer exists.");
+      return undefined;
+    }
+    const text = (await this.app.vault.read(file)).slice(start, end);
+    if (readingFingerprint(text) !== fingerprint) {
+      new Notice("Article has changed; saved position is not safe to restore.");
+      return undefined;
+    }
+    return { filename: file.path, sourcePath: file.path, start, end, text };
+  }
+
+  async resumeSavedReading(): Promise<void> {
+    if (this.readingActionPending) return;
+    this.readingActionPending = true;
+    try {
+      const opts = await this.savedOptions();
+      if (!opts) return;
+      const position = this.progress?.positionFor(opts);
+      if (position == null) {
+        new Notice("The saved sentence no longer matches this article.");
+        return;
+      }
+      const file = this.app.vault.getAbstractFileByPath(opts.sourcePath!);
+      if (file instanceof TFile)
+        await this.app.workspace.getLeaf(false).openFile(file);
+      await this.playSavedReading({ ...opts, resumeChunkIndex: position });
+    } catch (error) {
+      console.warn("Aloud: saved reading could not resume", error);
+      new Notice(
+        "Couldn't resume the saved article. Check vault access and try again.",
+      );
+    } finally {
+      this.readingActionPending = false;
+    }
+  }
+
+  async startOver(): Promise<void> {
+    if (this.readingActionPending) return;
+    this.readingActionPending = true;
+    try {
+      const active = this.audio.activeText;
+      let opts: AudioTextOptions | undefined;
+      if (
+        active?.audio.sourcePath &&
+        active.audio.sourceFingerprint != null &&
+        active.audio.sourceStart != null &&
+        active.audio.sourceEnd != null
+      ) {
+        opts = await this.optionsForSource(
+          active.audio.sourcePath,
+          active.audio.sourceStart,
+          active.audio.sourceEnd,
+          active.audio.sourceFingerprint,
+        );
+      } else if (active) {
+        const text = active.audio.chunks.map((chunk) => chunk.rawText).join("");
+        if (text.trim()) {
+          opts = {
+            filename: active.audio.filename,
+            text,
+            start: 0,
+            end: text.length,
+          };
+        }
+      } else {
+        opts = await this.savedOptions();
+      }
+      if (!opts) return;
+      active?.pause(); // Stop the old timeline before clearing its MediaSource.
+      await this.progress?.resetToStart(opts);
+      // Recreate detached/PDF playback without losing its status-bar menu.
+      if (active && !active.audio.sourcePath) {
+        this.playDetached(opts.text, opts.filename);
+        return;
+      }
+      // startPlayer clears the MediaSource timeline: even chunk zero rewinds.
+      await this.playSavedReading({ ...opts, resumeChunkIndex: 0 });
+    } catch (error) {
+      console.warn("Aloud: Start Over failed", error);
+      new Notice("Couldn't restart reading. Check vault access and try again.");
+    } finally {
+      this.readingActionPending = false;
+    }
   }
 
   playSelection(): void {

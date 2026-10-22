@@ -22,6 +22,7 @@ function createPlayer({ isPlaying = true } = {}): AudioStore {
         friendlyName: "sample.pdf: selected text",
       },
     },
+    closePlayer: vi.fn(),
     destroy: vi.fn(),
   } as unknown as AudioStore;
 }
@@ -181,7 +182,8 @@ describe("DetachedPlayerView", () => {
     fireEvent.click(screen.getByLabelText("Stop"));
 
     expect(player.activeText?.pause).toHaveBeenCalled();
-    expect(player.destroy).toHaveBeenCalled();
+    expect(player.closePlayer).toHaveBeenCalled();
+    expect(player.destroy).not.toHaveBeenCalled();
   });
 
   it("closes the full controls menu on outside click", async () => {
@@ -258,7 +260,7 @@ describe("DetachedPlayerHost", () => {
     expect(screen.getByLabelText("Open playback controls")).toBeTruthy();
     fireEvent.click(screen.getByLabelText("Open playback controls"));
 
-    expect(screen.getByLabelText("Play")).toBeTruthy();
+    expect(screen.getByLabelText("Continue")).toBeTruthy();
     expect(screen.getByLabelText("Stop")).toBeTruthy();
 
     host.destroy();

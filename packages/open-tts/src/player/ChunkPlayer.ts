@@ -204,6 +204,7 @@ export class ChunkPlayer {
       );
       const [start, end] = getLoadedRange(this.activeAudioText);
       const transitionType = await this._onAudioAudioChanged(foreground);
+      if (this.isDestroyed) return;
 
       if (transitionType === "position-changed") {
         const position = this.activeAudioText.position;
@@ -311,7 +312,9 @@ export class ChunkPlayer {
     }
     this.isDestroyed = true;
     this.chunkLoader.destroy();
-    this._clearAudio().then(() => {});
+    void this._clearAudio().catch((error: unknown) => {
+      console.warn("Unable to clear closed audio source", error);
+    });
     this._deactivate();
   }
 
@@ -729,6 +732,7 @@ const loadCheckLoop = (
 ): CancellablePromise<void> => {
   let cancelled = false;
   const inner = (): Promise<void> => {
+    if (cancelled || !system.audioStore.activeText) return Promise.resolve();
     // TODO - this process is not great between here and the loadCheck.
     // There's been some race conditions related to the current position.
     const position = nextToLoad(system.audioStore.activeText!, maxBufferAhead);

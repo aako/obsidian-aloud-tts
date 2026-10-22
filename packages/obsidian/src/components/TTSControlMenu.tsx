@@ -4,11 +4,13 @@ import { setIcon } from "obsidian";
 import { TTSActions } from "open-tts";
 import { AudioStore } from "open-tts";
 import { TTSPluginSettingsStore } from "open-tts";
+import type { ObsidianBridge } from "../ObsidianBridge";
 
 export interface TTSControlMenuProps {
   actions: TTSActions;
   player: AudioStore;
   settings: TTSPluginSettingsStore;
+  bridge?: ObsidianBridge;
   onClose: () => void;
   showRestartFromCursor?: boolean;
   showAutoscroll?: boolean;
@@ -28,8 +30,8 @@ export const TTSControlMenuContent = observer(
     actions,
     player,
     settings,
+    bridge,
     onClose,
-    showRestartFromCursor = true,
     showAutoscroll = true,
   }: TTSControlMenuProps): React.ReactElement => {
     const active = player.activeText;
@@ -59,6 +61,19 @@ export const TTSControlMenuContent = observer(
         {/* Grabber for mobile drawer UI */}
         <div className="menu-grabber" />
         <div className="menu-scroll">
+          {bridge?.readingProgressLabel() && (
+            <div className="tts-menu-row" role="status">
+              {bridge?.readingProgressLabel()}
+            </div>
+          )}
+          {active && active.position >= 0 && active.audio.chunks.length > 0 && (
+            <progress
+              className="tts-menu-progress"
+              aria-label="Reading progress"
+              value={active.position + 1}
+              max={active.audio.chunks.length}
+            />
+          )}
           {/* Playback controls group */}
           <div className="menu-group tts-menu-playback-group">
             <div className="tts-menu-row tts-menu-playback">
@@ -70,7 +85,9 @@ export const TTSControlMenuContent = observer(
               />
               <IconButton
                 icon={isPlaying ? "pause" : "play"}
-                label={isPlaying ? "Pause" : "Play"}
+                label={
+                  isPlaying ? "Pause" : active ? "Continue" : "Play Selection"
+                }
                 onClick={() => actions.playPause()}
                 primary
               />
@@ -92,31 +109,47 @@ export const TTSControlMenuContent = observer(
             </div>
           </div>
 
-          {showRestartFromCursor && (
+          {(bridge?.hasSavedReading() || active) && (
             <>
               <div className="menu-separator" />
-
               <div className="menu-group">
-                <div
-                  className="menu-item tappable"
-                  onClick={() => {
-                    actions.stop();
-                    actions.playSelection();
-                    onClose();
-                  }}
-                >
-                  <div className="menu-item-icon">
-                    <ObsidianIcon icon="play" />
-                  </div>
-                  <div className="menu-item-title">
-                    Restart playing from cursor
-                  </div>
-                </div>
+                {bridge?.hasSavedReading() && (
+                  <button
+                    className="menu-item tappable"
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      void bridge?.resumeSavedReading();
+                    }}
+                  >
+                    <span className="menu-item-icon">
+                      <ObsidianIcon icon="bookmark" />
+                    </span>
+                    <span className="menu-item-title">
+                      Resume saved article
+                    </span>
+                  </button>
+                )}
+                {bridge && (active || bridge.hasSavedReading()) && (
+                  <button
+                    className="menu-item tappable"
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      void bridge?.startOver();
+                    }}
+                  >
+                    <span className="menu-item-icon">
+                      <ObsidianIcon icon="rotate-ccw" />
+                    </span>
+                    <span className="menu-item-title">Start Over</span>
+                  </button>
+                )}
               </div>
             </>
           )}
 
-          {(showRestartFromCursor || showAutoscroll) && (
+          {(bridge?.hasSavedReading() || !!active || showAutoscroll) && (
             <div className="menu-separator" />
           )}
 

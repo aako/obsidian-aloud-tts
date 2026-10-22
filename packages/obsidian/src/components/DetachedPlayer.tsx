@@ -152,6 +152,7 @@ export const DetachedPlayerView = observer(
               actions={actions}
               player={player}
               settings={settings}
+              bridge={bridge}
               onClose={() => setIsMenuOpen(false)}
               showRestartFromCursor={false}
               showAutoscroll={false}
