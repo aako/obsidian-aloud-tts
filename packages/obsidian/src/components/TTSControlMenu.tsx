@@ -181,6 +181,57 @@ export const TTSControlMenuContent = observer(
             <div className="menu-separator" />
           )}
 
+          {bridge && (
+            <div className="menu-group">
+              {showRestartFromCursor && (
+                <>
+                  <button
+                    type="button"
+                    className="menu-item tappable"
+                    onClick={() => {
+                      onClose();
+                      void bridge.openArticleCache("document");
+                    }}
+                  >
+                    Pre-cache Entire Article
+                  </button>
+                  <button
+                    type="button"
+                    className="menu-item tappable"
+                    onClick={() => {
+                      onClose();
+                      void bridge.openArticleCache("selection");
+                    }}
+                  >
+                    Pre-cache Selection
+                  </button>
+                </>
+              )}
+              {bridge.hasSavedReading() && (
+                <button
+                  type="button"
+                  className="menu-item tappable"
+                  onClick={() => {
+                    onClose();
+                    void bridge.openArticleCache("saved");
+                  }}
+                >
+                  Pre-cache Saved Reading
+                </button>
+              )}
+              <button
+                type="button"
+                className="menu-item tappable"
+                onClick={() => {
+                  onClose();
+                  void bridge.openArticleCache("manage");
+                }}
+              >
+                Manage Article Cache
+              </button>
+            </div>
+          )}
+
           <div className="menu-group">
             <div className="menu-item tts-menu-speed">
               <div className="menu-item-icon">

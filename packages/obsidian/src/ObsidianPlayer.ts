@@ -5,10 +5,12 @@ import { TTSPluginSettingsStore } from "open-tts";
 import { AudioData, MediaFormat } from "open-tts";
 import { IndexedDBAudioStorage } from "open-tts/browser";
 import * as mobx from "mobx";
+import type { PersistentVaultCache } from "./PersistentVaultCache";
 
 export function configurableAudioCache(
   app: App,
   settings: TTSPluginSettingsStore,
+  persistent?: PersistentVaultCache,
 ): AudioCache & { destroy(): void } {
   const createCache = (): AudioCache =>
     settings.settings.cacheType === "vault"
@@ -30,7 +32,25 @@ export function configurableAudioCache(
       settings: TTSModelOptions,
       format: MediaFormat,
     ): Promise<AudioData | null> {
-      return active.getAudio(text, settings, format);
+      let persistentError: unknown;
+      try {
+        const saved = await persistent?.getAudio(text, settings, format);
+        if (saved) return saved;
+      } catch (error) {
+        persistentError = error;
+      }
+      // An intact older/local copy remains playable if iCloud hasn't downloaded yet.
+      const legacy = await obsidianFileVault(app).getAudio(
+        text,
+        settings,
+        format,
+      );
+      if (legacy) return legacy;
+      const local = await active.getAudio(text, settings, format);
+      if (local) return local;
+      // Do not call Azure to recreate an expected-but-missing iCloud file.
+      if (persistentError) throw persistentError;
+      return null;
     },
     async saveAudio(
       text: string,
@@ -40,6 +60,7 @@ export function configurableAudioCache(
       return active.saveAudio(text, settings, audio);
     },
     async expire(ageInMillis = 1000 * 60 * 60 * 8): Promise<void> {
+      if (settings.settings.cacheType === "vault") return;
       return active.expire(ageInMillis);
     },
     async getStorageSize(): Promise<number> {

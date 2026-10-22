@@ -20,6 +20,8 @@ import { TTSPluginSettingsStore } from "open-tts";
 import { TTSEditorBridge } from "@open-tts/ui";
 import { readingFingerprint } from "./ReadingProgress";
 import type { ReadingProgress } from "./ReadingProgress";
+import type { ArticleCache } from "./ArticleCache";
+import { ArticleCacheModal } from "./components/ArticleCacheModal";
 
 export interface ObsidianBridgeSpecifics {
   activeObsidianEditor: Editor | undefined;
@@ -38,6 +40,9 @@ export interface ObsidianBridge
   playDetached: (text: string, filename?: string) => void;
   playSelection: () => void;
   playDocument(): Promise<void>;
+  openArticleCache(
+    scope?: "document" | "selection" | "saved" | "manage",
+  ): Promise<void>;
   playClipboard: () => Promise<void>;
   playSavedReading: (opts: AudioTextOptions) => Promise<void>;
   hasSavedReading(): boolean;
@@ -117,6 +122,7 @@ export class ObsidianBridgeImpl implements ObsidianBridge {
     private audio: AudioStore,
     private settings: TTSPluginSettingsStore,
     private progress?: ReadingProgress,
+    private articleCache?: ArticleCache,
   ) {
     mobx.makeObservable(this, {
       active: mobx.observable.ref,
@@ -578,6 +584,54 @@ export class ObsidianBridgeImpl implements ObsidianBridge {
     } catch (error) {
       console.warn("Aloud: document playback failed", error);
       new Notice("Couldn't start document playback.");
+    }
+  }
+
+  async openArticleCache(
+    scope: "document" | "selection" | "saved" | "manage" = "document",
+  ): Promise<void> {
+    if (!this.articleCache) return;
+    try {
+      let opts: AudioTextOptions | undefined;
+      if (
+        scope === "saved" ||
+        (scope === "document" && !this.focusedEditorView?.editor)
+      )
+        opts = await this.savedOptions();
+      else if (scope !== "manage") {
+        const view = this.focusedEditorView;
+        if (!view?.editor || !view.file)
+          throw new Error("Focus a saved note first.");
+        const fullText = view.editor.getValue();
+        const selection =
+          scope === "selection" ? view.editor.getSelection() : "";
+        if (scope === "selection" && !selection.trim())
+          throw new Error("Select a passage first.");
+        const start =
+          scope === "selection"
+            ? view.editor.posToOffset(view.editor.getCursor("from"))
+            : 0;
+        const text = scope === "selection" ? selection : fullText;
+        opts = {
+          text,
+          start,
+          end: start + text.length,
+          filename: view.file.path,
+          sourcePath: view.file.path,
+        };
+      }
+      if (scope !== "manage" && !opts) return;
+      const job = opts ? await this.articleCache.prepare(opts) : undefined;
+      new ArticleCacheModal(
+        this.app,
+        this.articleCache,
+        this.settings,
+        job,
+      ).open();
+    } catch (error) {
+      new Notice(
+        error instanceof Error ? error.message : "Couldn't open article cache.",
+      );
     }
   }
 

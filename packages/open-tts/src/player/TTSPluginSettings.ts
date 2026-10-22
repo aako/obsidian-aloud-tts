@@ -12,6 +12,9 @@ export type TTSPluginSettings = {
   playbackSpeed: number;
   cacheType: "local" | "vault";
   cacheDurationMillis: number;
+  persistentCacheFolder: string;
+  persistentCacheMaxMB: number;
+  azureMonthlyBudget: number;
   showPlayerView: PlayerViewMode;
   showEditorActionButton: boolean;
   autoScrollPlayerView: boolean;
@@ -109,6 +112,8 @@ export interface AzureModelConfig {
   azure_region: string;
   /** the voice to use. Required */
   azure_voice: string;
+  /** Azure voice IDs pinned for quick access in the picker. */
+  azure_favoriteVoices: string[];
   /** the output format for the audio */
   azure_outputFormat: string;
 }
@@ -211,6 +216,9 @@ export const DEFAULT_SETTINGS: TTSPluginSettings = {
   playbackSpeed: 1.0,
   cacheDurationMillis: 1000 * 60 * 60 * 24 * 7, // 7 days
   cacheType: "local",
+  persistentCacheFolder: "_Aloud Audio Cache",
+  persistentCacheMaxMB: 1024,
+  azureMonthlyBudget: 450000,
   showPlayerView: "always-mobile",
   showEditorActionButton: true,
   autoScrollPlayerView: true,
@@ -246,6 +254,7 @@ export const DEFAULT_SETTINGS: TTSPluginSettings = {
   azure_apiKey: "",
   azure_region: "eastus",
   azure_voice: "en-US-JennyNeural",
+  azure_favoriteVoices: [],
   azure_outputFormat: "audio-24khz-96kbitrate-mono-mp3",
 
   // minimax

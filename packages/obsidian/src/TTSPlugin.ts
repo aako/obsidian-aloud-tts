@@ -1,8 +1,16 @@
 import { TTSCodeMirror } from "./TTSCodemirror";
 import { createPlayerSynchronizer } from "@open-tts/ui";
 
-import { MarkdownView, Plugin, Notice, addIcon } from "obsidian";
+import { MarkdownView, Plugin, Notice, TFile, addIcon } from "obsidian";
 import { ReadingProgress } from "./ReadingProgress";
+import { ArticleCache } from "./ArticleCache";
+import {
+  PersistentVaultCache,
+  ensureFolder,
+  readSnapshot,
+  writeSnapshot,
+} from "./PersistentVaultCache";
+import { azureRequestGate, validAzureLedger } from "open-tts";
 import { AloudMediaSession } from "./MediaSessionController";
 import { REGISTRY } from "open-tts";
 import { TTSSettingTab } from "./components/TTSPluginSettingsTab";
@@ -41,6 +49,7 @@ export default class TTSPlugin extends Plugin {
   private _playerSyncDisposer: (() => void) | undefined;
   private progress: ReadingProgress;
   private mediaSession?: AloudMediaSession;
+  private articleCache?: ArticleCache;
 
   get player(): AudioStore {
     return this.system.audioStore;
@@ -134,6 +143,16 @@ export default class TTSPlugin extends Plugin {
       id: "start-over",
       name: "Start Over (first sentence)",
       callback: () => void this.bridge.startOver(),
+    });
+    this.addCommand({
+      id: "precache-article",
+      name: "Pre-cache current article audio",
+      callback: () => void this.bridge.openArticleCache("document"),
+    });
+    this.addCommand({
+      id: "manage-article-cache",
+      name: "Manage article audio cache",
+      callback: () => void this.bridge.openArticleCache("manage"),
     });
 
     // Editor action button - always present, behavior differs by platform
@@ -277,6 +296,7 @@ export default class TTSPlugin extends Plugin {
   }
 
   async onunload(): Promise<void> {
+    await this.articleCache?.stop();
     await this.progress?.stop();
     this.mediaSession?.destroy();
     this.detachedPlayerHost?.destroy();
@@ -294,6 +314,44 @@ export default class TTSPlugin extends Plugin {
       (data) => this.saveData(data),
     );
 
+    // Ledger writes must finish before an Azure network request may begin.
+    // Keep this separate from data.json so frequent reservations never clobber settings.
+    const adapter = this.app.vault.adapter;
+    const ledgerFolder = `${this.app.vault.configDir}/plugins/${this.manifest.id}`;
+    const ledgerBase = `${ledgerFolder}/azure-usage`;
+    try {
+      const stored = await readSnapshot(adapter, ledgerBase, validAzureLedger);
+      let generation = stored?.generation ?? 0;
+      azureRequestGate.initialize(
+        stored?.value ?? {
+          month: new Date().toISOString().slice(0, 7),
+          characters: 0,
+          starts: [],
+          blockedUntil: 0,
+        },
+        async (value) => {
+          await ensureFolder(adapter, ledgerFolder);
+          // Two identical reservations, one per slot, so fallback can't undercount.
+          await writeSnapshot(adapter, ledgerBase, ++generation, value);
+          await writeSnapshot(adapter, ledgerBase, ++generation, value);
+        },
+      );
+    } catch (error) {
+      // Fail CLOSED: the gate remains uninitialized if the ledger cannot be read.
+      // Cached playback and non-Azure providers remain available.
+      console.error(
+        "Aloud: Azure ledger unavailable; synthesis disabled",
+        error,
+      );
+      new Notice(
+        "Aloud: Azure usage ledger unavailable. Azure generation is disabled; cached audio can still play.",
+      );
+    }
+    const persistent = new PersistentVaultCache(
+      adapter,
+      () => this.settings.settings.persistentCacheFolder,
+      () => this.settings.settings.persistentCacheMaxMB,
+    );
     const audio = await WebAudioSink.create();
     audio.onPlaybackFailure = (error: unknown): void => {
       const name = error instanceof Error ? error.name : "UnknownError";
@@ -305,7 +363,7 @@ export default class TTSPlugin extends Plugin {
         "Audio couldn't resume. Return to Aloud and tap Continue or Resume saved article.",
       );
     };
-    const cache = configurableAudioCache(this.app, this.settings);
+    const cache = configurableAudioCache(this.app, this.settings, persistent);
     this.cache = cache;
     this.system = createAudioSystem({
       settings: () => this.settings.settings,
@@ -318,6 +376,31 @@ export default class TTSPlugin extends Plugin {
         backgroundLoaderIntervalMillis: 1000,
       }),
     });
+    this.articleCache = new ArticleCache(
+      this.system,
+      persistent,
+      async (path: string): Promise<string> => {
+        const file = this.app.vault.getAbstractFileByPath(path);
+        if (!(file instanceof TFile))
+          throw new Error(
+            "The saved article cannot be found. No Azure request was sent.",
+          );
+        return this.app.vault.read(file);
+      },
+    );
+    try {
+      await this.articleCache.load();
+    } catch (error) {
+      console.warn(
+        "Aloud: article cache metadata unavailable; no automatic regeneration",
+        error,
+      );
+      new Notice(
+        "Aloud: article cache metadata unavailable. Check iCloud downloads; existing files were not changed.",
+      );
+      this.articleCache.destroy();
+      this.articleCache = undefined;
+    }
     this.progress = new ReadingProgress(
       this.app,
       this.app.vault.adapter,
@@ -331,6 +414,7 @@ export default class TTSPlugin extends Plugin {
       this.player,
       this.settings,
       this.progress,
+      this.articleCache,
     );
     this.progress.start();
     this.mediaSession = new AloudMediaSession(this.player, audio);

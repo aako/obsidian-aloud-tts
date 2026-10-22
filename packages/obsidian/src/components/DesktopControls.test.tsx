@@ -19,6 +19,7 @@ const mockProps = () => {
   } as unknown as TTSActions;
   const bridge = {
     playDocument: vi.fn().mockResolvedValue(undefined),
+    openArticleCache: vi.fn().mockResolvedValue(undefined),
     hasSavedReading: vi.fn(() => false),
     readingProgressLabel: vi.fn((): string | undefined => undefined),
     resumeSavedReading: vi.fn().mockResolvedValue(undefined),
@@ -44,12 +45,14 @@ describe("Desktop's shared Aloud controls", () => {
     expect(props.onClose).toHaveBeenCalledOnce();
   });
 
-  it("preserves explicit selection and does not display unfinished cache controls", () => {
+  it("preserves explicit selection and shows finished cache controls", () => {
     const props = mockProps();
     render(<TTSControlMenuContent {...props} />);
     fireEvent.click(screen.getByText("Play Selection / From Cursor"));
     expect(props.actions.playSelection).toHaveBeenCalledOnce();
-    expect(screen.queryByText("Pre-cache Entire Article")).toBeNull();
+    expect(screen.getByText("Pre-cache Entire Article")).toBeTruthy();
+    fireEvent.click(screen.getByText("Pre-cache Entire Article"));
+    expect(props.bridge.openArticleCache).toHaveBeenCalledWith("document");
   });
 
   it("keeps detached controls free of note-specific actions", () => {

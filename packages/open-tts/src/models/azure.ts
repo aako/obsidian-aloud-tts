@@ -1,5 +1,6 @@
 import type { TTSPluginSettings } from "../player/TTSPluginSettings";
 import type { AudioData } from "./tts-model";
+import { azureCharacters, azureRequestGate } from "./AzureRequestGate";
 import {
   AudioTextContext,
   ErrorMessage,
@@ -71,23 +72,73 @@ export async function azureCallTextToSpeech(
     </voice>
   </speak>`;
 
-  const response = await fetch(`${options.apiUri}/cognitiveservices/v1`, {
-    method: "POST",
-    headers: {
-      "Ocp-Apim-Subscription-Key": options.apiKey || "",
-      "Content-Type": "application/ssml+xml",
-      "X-Microsoft-OutputFormat":
-        options.model || "audio-24khz-96kbitrate-mono-mp3",
-      "User-Agent": "obsidian-aloud-tts",
-    },
-    body: ssmlBody,
-    signal,
-  });
+  const characters = azureCharacters(text);
+  if (characters > 4000)
+    throw new Error(
+      "Azure chunk exceeds the conservative 4,000-character request limit. Use sentence chunking.",
+    );
+  signal ??= context.request?.signal;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await azureRequestGate.request(
+        async () => {
+          const response = await fetch(
+            `${options.apiUri}/cognitiveservices/v1`,
+            {
+              method: "POST",
+              headers: {
+                "Ocp-Apim-Subscription-Key": options.apiKey || "",
+                "Content-Type": "application/ssml+xml",
+                "X-Microsoft-OutputFormat":
+                  options.model || "audio-24khz-96kbitrate-mono-mp3",
+                "User-Agent": "obsidian-aloud-tts",
+              },
+              body: ssmlBody,
+              ...(signal ? { signal } : {}),
+            },
+          );
 
-  await validate200Azure(response);
-  const buf = await response.arrayBuffer();
-  // Always return mp3 format for cache consistency. Dynamic format selection not yet supported.
-  return { data: buf, format: "mp3" };
+          if (response.status === 429 || response.status >= 500) {
+            const retry = response.headers?.get("Retry-After");
+            const delay = retry
+              ? /^\d+(\.\d+)?$/.test(retry)
+                ? Number(retry) * 1000
+                : Math.max(0, Date.parse(retry) - Date.now())
+              : 0;
+            azureRequestGate.defer(
+              Math.max(
+                Number.isFinite(delay) ? delay : 0,
+                Math.min(30_000, 1000 * 2 ** attempt) + Math.random() * 500,
+              ),
+            );
+          }
+          await validate200Azure(response);
+          const buf = await response.arrayBuffer();
+          // Always return mp3 format for cache consistency. Dynamic format selection not yet supported.
+          return { data: buf, format: "mp3" };
+        },
+        {
+          characters,
+          budget:
+            context.request?.budgetLimit ??
+            settings.azureMonthlyBudget ??
+            450000,
+          priority: context.request?.priority,
+          signal,
+          onWait: context.request?.onWait,
+        },
+      );
+    } catch (error) {
+      if (
+        signal?.aborted ||
+        attempt >= 3 ||
+        (error instanceof TTSErrorInfo && !error.isRetryable) ||
+        !(error instanceof TTSErrorInfo || error instanceof TypeError)
+      )
+        throw error;
+      azureRequestGate.defer(1000 * 2 ** attempt + Math.random() * 500);
+    }
+  }
 }
 
 export async function listAzureVoices(

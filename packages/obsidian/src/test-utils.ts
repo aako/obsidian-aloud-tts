@@ -20,6 +20,7 @@ export const createMockObsidianBridge = () => ({
   triggerSelection: vi.fn(),
   playSelection: vi.fn(),
   playDocument: vi.fn(),
+  openArticleCache: vi.fn(),
   playDetached: vi.fn(),
   playClipboard: vi.fn(),
   playSavedReading: vi.fn(),
