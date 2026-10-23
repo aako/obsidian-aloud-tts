@@ -7,6 +7,7 @@ import { openAILikeTextToSpeech } from "./openai-like";
 import { elevenLabsTextToSpeech } from "./elevenlabs";
 import { azureTextToSpeech } from "./azure";
 import { googleChirpTTS } from "./google-chirp";
+import { speechifyTextToSpeech } from "./speechify";
 import { minimaxTextToSpeech } from "./minimax";
 import { inworldTextToSpeech } from "./inworld";
 import { pollyTextToSpeech } from "./polly";
@@ -20,6 +21,7 @@ export const REGISTRY: Record<ModelProvider, TTSModel> = {
   elevenlabs: elevenLabsTextToSpeech,
   azure: azureTextToSpeech,
   google_chirp: googleChirpTTS,
+  speechify: speechifyTextToSpeech,
   minimax: minimaxTextToSpeech,
   fish: fishTextToSpeech,
   inworld: inworldTextToSpeech,

@@ -147,7 +147,9 @@ export class ChunkLoader {
       text,
       options,
       0,
-      this.system.settings.modelProvider === "azure" ? 0 : 3,
+      ["azure", "speechify"].includes(this.system.settings.modelProvider)
+        ? 0
+        : 3,
       context,
     ).finally(() => requests!.delete(key));
     requests.set(key, pending);

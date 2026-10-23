@@ -7,6 +7,8 @@ import {
   azureCharacters,
   azureRequestGate,
   googleChirpRequestGate,
+  speechifyRequestGate,
+  speechifyCharacters,
   googleChirpCharacters,
   buildTrack,
   hashAudioInputs,
@@ -268,7 +270,9 @@ export class ArticleCache {
       const count =
         this.system.settings.modelProvider === "google_chirp"
           ? googleChirpCharacters(chunk.text)
-          : azureCharacters(chunk.text);
+          : this.system.settings.modelProvider === "speechify"
+            ? speechifyCharacters(chunk.text)
+            : azureCharacters(chunk.text);
       characters += count;
       const audio = await this.system.storage.getAudio(
         chunk.text,
@@ -285,20 +289,28 @@ export class ArticleCache {
     }
     const google = this.system.settings.modelProvider === "google_chirp";
     const azure = this.system.settings.modelProvider === "azure";
-    const gate = google ? googleChirpRequestGate : azureRequestGate;
-    const budget = google
-      ? this.system.settings.googleChirpMonthlyBudget
-      : this.system.settings.azureMonthlyBudget;
+    const speechify = this.system.settings.modelProvider === "speechify";
+    const gate = speechify
+      ? speechifyRequestGate
+      : google
+        ? googleChirpRequestGate
+        : azureRequestGate;
+    const budget = speechify
+      ? this.system.settings.speechifyMonthlyBudget
+      : google
+        ? this.system.settings.googleChirpMonthlyBudget
+        : this.system.settings.azureMonthlyBudget;
     const remaining = Math.max(0, budget - gate.used);
     return {
       characters,
       cached,
       missing: chunks.length - cached,
-      requests: azure || google ? missingKeys.size : 0,
+      requests: azure || google || speechify ? missingKeys.size : 0,
       additionalCharacters,
       approximateBytes: bytes + additionalCharacters * 800,
       remaining,
-      exceedsBudget: (azure || google) && additionalCharacters > remaining,
+      exceedsBudget:
+        (azure || google || speechify) && additionalCharacters > remaining,
     };
   }
 
@@ -319,10 +331,17 @@ export class ArticleCache {
       );
       const chunks = buildTrack(await this.options(job), job.chunkType).chunks;
       const google = this.system.settings.modelProvider === "google_chirp";
-      const gate = google ? googleChirpRequestGate : azureRequestGate;
-      const budget = google
-        ? this.system.settings.googleChirpMonthlyBudget
-        : this.system.settings.azureMonthlyBudget;
+      const speechify = this.system.settings.modelProvider === "speechify";
+      const gate = speechify
+        ? speechifyRequestGate
+        : google
+          ? googleChirpRequestGate
+          : azureRequestGate;
+      const budget = speechify
+        ? this.system.settings.speechifyMonthlyBudget
+        : google
+          ? this.system.settings.googleChirpMonthlyBudget
+          : this.system.settings.azureMonthlyBudget;
       const limit = consent
         ? Math.max(budget, gate.used + estimate.additionalCharacters)
         : budget;
@@ -360,7 +379,7 @@ export class ArticleCache {
                     if (job.state === "running") {
                       job.state = "waiting";
                       job.message =
-                        "Waiting for the shared Azure rate limit. Pause/cancel takes effect at this chunk boundary.";
+                        "Waiting for the provider request gate. Pause/cancel takes effect at this chunk boundary.";
                     }
                   });
                 },

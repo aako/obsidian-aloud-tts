@@ -19,6 +19,13 @@ This is the durable project handover, not a substitute for reading the current c
 - `ios.8` added ordinary-playback-to-shared-cache writes and configuration change handling. Live voice-switch races and cross-device behavior still require investigation.
 - Alternating metadata snapshots improve interrupted-write recovery but do not create cross-device transactions.
 
+## Speechify Provider Candidate
+
+- Speechify Simba streaming provider is proposed in a feature PR, not yet shipped.
+- Uses the native `/v1/audio/stream` MP3 endpoint; defaults to Simba 3.2 and `geffen_32`.
+- The local cap starts at zero and reserves characters before each request; this is **not** Speechify account billing or free-tier entitlement. Free starter credits are not monthly.
+- Test with a short sentence on a separate vault before approving full-article synthesis. Physical audio playback, catalog availability, and real-account credit behavior remain unverified.
+
 ## Prioritized Risk Register — Investigation Needed
 
 1. **Incomplete cache identity:** Audit every provider. ElevenLabs stability/similarity parameters and OpenAI-compatible response format are examples of audio-affecting options absent from the current common hash.

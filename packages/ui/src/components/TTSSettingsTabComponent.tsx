@@ -19,6 +19,7 @@ import { OptionSelect } from "./settings/option-select";
 import { SettingSection } from "./settings/setting-components";
 import { AzureSettings } from "./settings/providers/provider-azure";
 import { GoogleChirpSettings } from "./settings/providers/provider-google-chirp";
+import { SpeechifySettings } from "./settings/providers/provider-speechify";
 import { ElevenLabsSettings } from "./settings/providers/provider-elevenlabs";
 import { GeminiSettings } from "./settings/providers/provider-gemini";
 import { HumeSettings } from "./settings/providers/provider-hume";
@@ -35,6 +36,7 @@ const providerSettingsViews: Record<
 > = {
   azure: AzureSettings,
   google_chirp: GoogleChirpSettings,
+  speechify: SpeechifySettings,
   elevenlabs: ElevenLabsSettings,
   gemini: GeminiSettings,
   hume: HumeSettings,
@@ -144,6 +146,7 @@ const labels: Record<ModelProvider, string> = {
   openaicompat: "OpenAI Compatible (Advanced)",
   azure: "Azure Speech Services",
   google_chirp: "Google Chirp 3 HD",
+  speechify: "Speechify",
   elevenlabs: "ElevenLabs",
   gemini: "Google Gemini",
   hume: "Hume",
