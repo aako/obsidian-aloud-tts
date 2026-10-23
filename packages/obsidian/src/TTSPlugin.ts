@@ -1,7 +1,14 @@
 import { TTSCodeMirror } from "./TTSCodemirror";
 import { createPlayerSynchronizer } from "@open-tts/ui";
 
-import { MarkdownView, Plugin, Notice, TFile, addIcon } from "obsidian";
+import {
+  MarkdownView,
+  Plugin,
+  Notice,
+  TFile,
+  addIcon,
+  requestUrl,
+} from "obsidian";
 import { ReadingProgress } from "./ReadingProgress";
 import { ArticleCache } from "./ArticleCache";
 import {
@@ -15,6 +22,7 @@ import {
   validAzureLedger,
   googleChirpRequestGate,
   speechifyRequestGate,
+  configureSpeechifyTransport,
 } from "open-tts";
 import { AloudMediaSession } from "./MediaSessionController";
 import { REGISTRY } from "open-tts";
@@ -301,6 +309,8 @@ export default class TTSPlugin extends Plugin {
   }
 
   async onunload(): Promise<void> {
+    // Do not retain an Obsidian-specific transport after the plugin unloads.
+    configureSpeechifyTransport();
     await this.articleCache?.stop();
     await this.progress?.stop();
     this.mediaSession?.destroy();
@@ -314,6 +324,40 @@ export default class TTSPlugin extends Plugin {
   }
 
   async loadSettings() {
+    // Obsidian's native HTTP API bypasses WebView CORS on macOS and iOS.
+    // It buffers complete responses, matching Aloud's chunk-based playback.
+    // Never try fetch first and retry a failed POST here: the first request
+    // might have reached Speechify and incurred a charge.
+    configureSpeechifyTransport(
+      async ({ url, method, headers, body, signal }) => {
+        if (signal?.aborted)
+          throw new DOMException("Speechify request cancelled.", "AbortError");
+        const response = await requestUrl({
+          url,
+          method,
+          headers,
+          ...(body !== undefined ? { body } : {}),
+          throw: false,
+        });
+        // requestUrl does not support aborting an in-flight native request.
+        // Ignore its output if playback was cancelled while it was running.
+        if (signal?.aborted)
+          throw new DOMException("Speechify request cancelled.", "AbortError");
+        return {
+          status: response.status,
+          ok: response.status >= 200 && response.status < 300,
+          headers: {
+            get: (name: string): string | null =>
+              Object.entries(response.headers).find(
+                ([key]) => key.toLowerCase() === name.toLowerCase(),
+              )?.[1] ?? null,
+          },
+          // Keep JSON parsing lazy; successful MP3 responses are binary.
+          json: async (): Promise<unknown> => response.json,
+          arrayBuffer: async (): Promise<ArrayBuffer> => response.arrayBuffer,
+        };
+      },
+    );
     this.settings = await pluginSettingsStore(
       () => this.loadData(),
       (data) => this.saveData(data),

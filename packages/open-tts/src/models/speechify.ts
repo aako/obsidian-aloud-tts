@@ -12,6 +12,52 @@ import {
 const ENDPOINT = "https://api.speechify.ai/v1";
 export const speechifyRequestGate = new AzureRequestGate("Speechify");
 
+/** Keep the shared library independent of Obsidian's native requestUrl API. */
+export interface SpeechifyHttpRequest {
+  url: string;
+  method: "GET" | "POST";
+  headers: Record<string, string>;
+  body?: string;
+  signal?: AbortSignal;
+}
+
+export interface SpeechifyHttpResponse {
+  ok: boolean;
+  status: number;
+  headers: { get(name: string): string | null };
+  json(): Promise<unknown>;
+  arrayBuffer(): Promise<ArrayBuffer>;
+}
+
+export type SpeechifyHttpTransport = (
+  request: SpeechifyHttpRequest,
+) => Promise<SpeechifyHttpResponse>;
+
+let speechifyNativeTransport: SpeechifyHttpTransport | undefined;
+
+/** Obsidian installs an uncorsed transport at startup and clears it on unload. */
+export function configureSpeechifyTransport(
+  transport?: SpeechifyHttpTransport,
+): void {
+  speechifyNativeTransport = transport;
+}
+
+async function speechifyHttpRequest(
+  request: SpeechifyHttpRequest,
+): Promise<SpeechifyHttpResponse> {
+  if (request.signal?.aborted)
+    throw new DOMException("Speechify request cancelled.", "AbortError");
+  if (speechifyNativeTransport) return speechifyNativeTransport(request);
+  // The standalone web app continues to use normal fetch; only Obsidian
+  // installs its native requestUrl transport, which avoids WebView CORS.
+  return fetch(request.url, {
+    method: request.method,
+    headers: request.headers,
+    ...(request.body !== undefined ? { body: request.body } : {}),
+    ...(request.signal ? { signal: request.signal } : {}),
+  });
+}
+
 export type SpeechifyModel = "simba-3.0" | "simba-3.2" | "simba-3.5";
 export interface SpeechifyVoice {
   id: string;
@@ -25,7 +71,7 @@ export function speechifyCharacters(text: string): number {
   return Array.from(text).length;
 }
 
-async function speechifyError(response: Response): Promise<never> {
+async function speechifyError(response: SpeechifyHttpResponse): Promise<never> {
   let message = `Speechify HTTP ${response.status}`;
   try {
     const body: unknown = await response.json();
@@ -57,7 +103,9 @@ export async function listSpeechifyVoices(
   for (let page = 0; page < 50; page++) {
     const query = new URLSearchParams({ locale: "en-US", model });
     if (cursor) query.set("cursor", cursor);
-    const response = await fetch(`${ENDPOINT}/voices?${query.toString()}`, {
+    const response = await speechifyHttpRequest({
+      url: `${ENDPOINT}/voices?${query.toString()}`,
+      method: "GET",
       headers: { Authorization: `Bearer ${apiKey}` },
     });
     if (!response.ok) return speechifyError(response);
@@ -126,7 +174,8 @@ export async function speechifySynthesize(
   signal ??= context.request?.signal;
   return speechifyRequestGate.request(
     async () => {
-      const response = await fetch(`${ENDPOINT}/audio/stream`, {
+      const response = await speechifyHttpRequest({
+        url: `${ENDPOINT}/audio/stream`,
         method: "POST",
         headers: {
           Authorization: `Bearer ${options.apiKey}`,

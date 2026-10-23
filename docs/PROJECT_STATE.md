@@ -26,6 +26,12 @@ This is the durable project handover, not a substitute for reading the current c
 - The local cap starts at zero and reserves characters before each request; this is **not** Speechify account billing or free-tier entitlement. Free starter credits are not monthly.
 - Test with a short sentence on a separate vault before approving full-article synthesis. Physical audio playback, catalog availability, and real-account credit behavior remain unverified.
 
+## Speechify Native Transport Fix (Candidate ios.10)
+
+- Voice listing and synthesis use Obsidian's native `requestUrl` adapter on desktop/iOS to avoid WebView cross-origin failures ("Failed to fetch"). The standalone web app keeps using browser `fetch`.
+- The request is issued **once**, directly through the selected transport. A failed or interrupted POST is never retried automatically, because generation might already have been billed.
+- This change needs a short real-key playback and voice-catalog test in the existing Obsidian vault after publication; mocked tests do not establish live Speechify connectivity.
+
 ## Prioritized Risk Register — Investigation Needed
 
 1. **Incomplete cache identity:** Audit every provider. ElevenLabs stability/similarity parameters and OpenAI-compatible response format are examples of audio-affecting options absent from the current common hash.
