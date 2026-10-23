@@ -10,20 +10,21 @@ import { TTSActions, createTTSActions } from "open-tts";
 import { EditorActionIcon } from "@open-tts/ui";
 import { TTSControlMenuContent } from "./components/TTSControlMenu";
 
-const EDITOR_ACTION_ATTR = "data-aloud-action";
+const EDITOR_ACTION_ATTR = "data-aloud-ios-fork-action";
 
 type SinkWithElement = AudioSink & { audioElement?: HTMLAudioElement };
 
 interface ActionButtonState {
-  root: Root;
-  disposer: IReactionDisposer;
+  button: HTMLElement;
+  root?: Root;
+  disposer?: IReactionDisposer;
 }
 
 /**
  * Manages the editor action button.
  *
  * Behavior differs by platform:
- * - Desktop/tablets: Static icon, click always plays selection
+ * - Desktop/tablets: Static icon, click opens anchored controls
  * - Mobile phones: Visualizer when playing, menu on click when active
  */
 export class TTSEditorAction {
@@ -31,6 +32,7 @@ export class TTSEditorAction {
   private leafStates = new Map<WorkspaceLeaf, ActionButtonState>();
   private menuRoot: Root | null = null;
   private menuContainer: HTMLElement | null = null;
+  private backdrop: HTMLElement | null = null;
 
   constructor(
     private plugin: Plugin,
@@ -54,6 +56,7 @@ export class TTSEditorAction {
     // Add to newly opened leaves
     this.plugin.registerEvent(
       this.plugin.app.workspace.on("active-leaf-change", (leaf) => {
+        this.closeMenu();
         if (this.settings.settings.showEditorActionButton) {
           this.addToLeaf(leaf);
         }
@@ -90,9 +93,8 @@ export class TTSEditorAction {
    */
   destroy(): void {
     this.closeMenu();
-    for (const [, state] of this.leafStates) {
-      state.disposer();
-      state.root.unmount();
+    for (const [leaf, state] of this.leafStates) {
+      this.disposeLeafState(leaf, state);
     }
     this.leafStates.clear();
   }
@@ -111,6 +113,14 @@ export class TTSEditorAction {
   private addToLeaf(leaf: WorkspaceLeaf | null): void {
     const view = leaf?.view;
     if (!(view instanceof MarkdownView)) return;
+    const previous = leaf && this.leafStates.get(leaf);
+    if (
+      previous &&
+      previous.button.isConnected &&
+      (view.containerEl as HTMLElement).contains(previous.button)
+    )
+      return;
+    if (leaf && previous) this.disposeLeafState(leaf, previous);
 
     // Prevent duplicates (leaf can be re-used)
     const container = view.containerEl as HTMLElement;
@@ -132,8 +142,10 @@ export class TTSEditorAction {
 
       // Store state for cleanup
       if (leaf) {
-        this.leafStates.set(leaf, { root, disposer });
+        this.leafStates.set(leaf, { button: action, root, disposer });
       }
+    } else if (leaf) {
+      this.leafStates.set(leaf, { button: action });
     }
   }
 
@@ -165,30 +177,29 @@ export class TTSEditorAction {
     evt.stopPropagation();
     evt.preventDefault();
 
-    // Desktop/tablets: always just play selection (like old ribbon icon)
-    if (!this.isMobilePhone) {
-      this.actions.playSelection();
-      return;
-    }
-
     // Mobile phones: play if idle, show menu if active
-    if (!this.player.activeText) {
+    if (
+      this.isMobilePhone &&
+      !this.player.activeText &&
+      !this.bridge.hasSavedReading()
+    ) {
       this.actions.playSelection();
       return;
     }
 
-    // If playing, show control menu
-    this.showMenu(evt);
+    // The desktop action always opens controls; mobile preserves idle one-tap playback.
+    if (this.menuContainer) this.closeMenu();
+    else this.showMenu(evt);
   }
 
-  private showMenu(_evt: MouseEvent): void {
+  private showMenu(evt: MouseEvent): void {
     // Close any existing menu
     this.closeMenu();
 
     // Create backdrop like Obsidian does
     const backdrop = document.createElement("div");
     backdrop.addClass("suggestion-bg");
-    backdrop.style.opacity = "0.85";
+    backdrop.style.opacity = this.isMobilePhone ? "0.85" : "0";
     backdrop.addEventListener("click", () => this.closeMenu());
     document.body.appendChild(backdrop);
 
@@ -198,7 +209,24 @@ export class TTSEditorAction {
     document.body.appendChild(this.menuContainer);
 
     // Store backdrop for cleanup
-    (this.menuContainer as any)._backdrop = backdrop;
+    this.backdrop = backdrop;
+    this.menuContainer.setAttribute("aria-label", "Aloud playback controls");
+    if (!this.isMobilePhone) {
+      this.menuContainer.classList.add("tts-desktop-controls");
+      const anchor =
+        evt.currentTarget instanceof HTMLElement
+          ? evt.currentTarget.getBoundingClientRect()
+          : null;
+      const width = Math.min(340, window.innerWidth - 16);
+      this.menuContainer.style.width = `${width}px`;
+      this.menuContainer.style.left = `${Math.max(8, Math.min(anchor?.left ?? evt.clientX, window.innerWidth - width - 8))}px`;
+      const top = Math.max(
+        8,
+        Math.min(anchor?.bottom ?? evt.clientY, window.innerHeight - 220),
+      );
+      this.menuContainer.style.top = `${top}px`;
+      this.menuContainer.style.maxHeight = `${window.innerHeight - top - 8}px`;
+    }
 
     // Mount the React menu content (without outer .menu wrapper since container already has it)
     this.menuRoot = createRoot(this.menuContainer);
@@ -207,6 +235,7 @@ export class TTSEditorAction {
         actions: this.actions,
         player: this.player,
         settings: this.settings,
+        bridge: this.bridge,
         onClose: () => this.closeMenu(),
       }),
     );
@@ -219,8 +248,8 @@ export class TTSEditorAction {
     }
     if (this.menuContainer) {
       // Remove backdrop if it exists
-      const backdrop = (this.menuContainer as any)._backdrop as HTMLElement;
-      backdrop?.remove();
+      this.backdrop?.remove();
+      this.backdrop = null;
       this.menuContainer.remove();
       this.menuContainer = null;
     }
@@ -244,8 +273,9 @@ export class TTSEditorAction {
     leaf: WorkspaceLeaf,
     state: ActionButtonState,
   ): void {
-    state.disposer();
-    state.root.unmount();
+    state.disposer?.();
+    state.root?.unmount();
+    state.button.remove();
     this.leafStates.delete(leaf);
   }
 }

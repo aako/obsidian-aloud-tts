@@ -20,6 +20,12 @@ export interface PcmMetadata {
 }
 
 export interface AudioTextContext {
+  request?: {
+    priority?: "foreground" | "background";
+    signal?: AbortSignal;
+    budgetLimit?: number;
+    onWait?: () => void;
+  };
   textBefore?: string;
   textAfter?: string;
 }

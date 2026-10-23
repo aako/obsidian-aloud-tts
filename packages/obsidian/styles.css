@@ -541,3 +541,123 @@ details[open] .tts-error-details {
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
+
+/* Sentence progress uses actual chunk counts, not estimated duration. */
+.tts-menu-progress {
+  display: block;
+  width: calc(100% - 24px);
+  height: 6px;
+  margin: 0 12px 8px;
+  accent-color: var(--interactive-accent);
+}
+
+/* Anchored Aloud desktop controls: never turn desktop into the mobile sheet. */
+.menu.tts-desktop-controls {
+  position: fixed;
+  bottom: auto;
+  right: auto;
+  transform: none;
+  overflow-y: auto;
+  z-index: 1001;
+}
+
+.tts-desktop-controls .menu-grabber {
+  display: none;
+}
+
+/* Persistent Article Audio Cache management modal. */
+.tts-cache-panel label {
+  display: block;
+  margin: 12px 0;
+}
+.tts-cache-panel select,
+.tts-cache-panel input:not([type="checkbox"]) {
+  max-width: 100%;
+}
+.tts-cache-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+/* Azure voice search, filters, favorites, and scrolling results. */
+.tts-azure-voices {
+  display: block;
+}
+.tts-azure-voice-current {
+  margin-top: 8px;
+}
+.tts-azure-voice-browser {
+  min-width: 0;
+  width: 100%;
+  margin-top: 12px;
+}
+.tts-azure-voice-browser > input[type="search"] {
+  box-sizing: border-box;
+  width: 100%;
+}
+.tts-azure-voice-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+.tts-azure-voice-filters select {
+  min-width: 110px;
+  max-width: 100%;
+}
+.tts-azure-voice-filters label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.tts-azure-voice-results {
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+}
+.tts-azure-voice-row {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.tts-azure-voice-row:last-child {
+  border-bottom: 0;
+}
+.tts-azure-voice-select {
+  text-align: left;
+  flex: 1;
+  min-width: 0;
+  padding: 7px 9px;
+  height: auto;
+  white-space: normal;
+  background: transparent;
+  box-shadow: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+.tts-azure-voice-select small {
+  color: var(--text-muted);
+  font-size: 0.78em;
+  overflow-wrap: anywhere;
+}
+.tts-azure-voice-select.is-selected {
+  background-color: var(--background-modifier-hover);
+  outline: 1px solid var(--interactive-accent);
+}
+.tts-azure-voice-star {
+  flex: none;
+  min-width: 40px;
+  font-size: 1.35em;
+  color: var(--text-muted);
+  background: transparent;
+  box-shadow: none;
+}
+.tts-azure-voice-star[aria-pressed="true"] {
+  color: var(--text-accent);
+}

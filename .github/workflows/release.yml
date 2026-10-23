@@ -1,67 +1,120 @@
-name: Release Obsidian plugin
+name: Aloud - Verify and publish
 
 on:
   pull_request:
-    branches:
-      - "*"
+    branches: [main]
   push:
-    tags:
-      - "*"
+    branches: [main]
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to release (e.g., 0.10.1 or 0.10.1-rc1)"
+        description: "Version to publish (must exactly match manifest.json, e.g. 0.15.1-ios.8)"
         required: true
         type: string
 
+# Pull requests and normal pushes cannot publish releases.
+permissions:
+  contents: read
+
+concurrency:
+  group: aloud-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: false
+
 jobs:
-  build:
+  verify:
+    name: Validate source and build
     runs-on: ubuntu-latest
-
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v3
-
-      - name: Use Node.js
-        uses: actions/setup-node@v3
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: "20.x"
-
-      - name: Enable Corepack
+          node-version: "22"
+      - name: Enable pinned pnpm via Corepack
+        run: corepack enable
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Check TypeScript
+        run: pnpm typecheck
+      - name: Lint
+        run: pnpm lint
+      - name: Check formatting
+        run: pnpm format:check
+      - name: Test
+        run: pnpm test
+      - name: Build
+        run: pnpm build
+      - name: Verify release asset inputs
         run: |
-          corepack enable
+          test -s packages/obsidian/main.js
+          test -s packages/obsidian/styles.css
+          test -s manifest.json
 
-      - name: Build plugin
+  publish:
+    name: Publish explicitly approved release
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Enable pinned pnpm via Corepack
+        run: corepack enable
+      - name: Build the Obsidian plugin from the verified commit
         run: |
-          pnpm install
-          pnpm run lint
-          pnpm run format:check
-          pnpm run test
-          pnpm run web:build
-          pnpm run build
-
-      - name: Create release
-        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+          pnpm install --frozen-lockfile
+          pnpm --filter obsidian-aloud-tts build
+      - name: Verify requested version and reject existing tags or releases
         env:
-          GITHUB_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            tag="${{ github.event.inputs.version }}"
-          else
-            tag="${GITHUB_REF#refs/tags/}"
+          set -euo pipefail
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
+          const version = process.env.RELEASE_VERSION || '';
+          if (!/^\d+\.\d+\.\d+-ios\.\d+$/.test(version)) {
+            throw new Error('Invalid Aloud iOS fork version: ' + version);
+          }
+          if (manifest.id !== 'aloud-ios-fork' || manifest.version !== version) {
+            throw new Error(`Manifest mismatch: id=${manifest.id}, manifest version=${manifest.version}, requested=${version}`);
+          }
+          NODE
+          if gh release view "$RELEASE_VERSION" >/dev/null 2>&1; then
+            echo "Release $RELEASE_VERSION already exists. Refusing to replace it." >&2
+            exit 1
           fi
-
-          # Check if this is a pre-release version
-          if echo "$tag" | grep -qE -- '-(rc|alpha|beta)'; then
-            # Pre-release version
-            gh release create "$tag" \
-              --title="$tag" \
-              --prerelease \
-              --generate-notes \
-              packages/obsidian/main.js manifest.json packages/obsidian/styles.css
-          else
-            # Full release version
-            gh release create "$tag" \
-              --title="$tag" \
-              --generate-notes \
-              packages/obsidian/main.js manifest.json packages/obsidian/styles.css
+          if git ls-remote --tags origin "refs/tags/$RELEASE_VERSION" | grep -q .; then
+            echo "Tag $RELEASE_VERSION already exists. Refusing to move it." >&2
+            exit 1
           fi
+          test -s packages/obsidian/main.js
+          test -s packages/obsidian/styles.css
+          sha256sum packages/obsidian/main.js manifest.json packages/obsidian/styles.css
+      - name: Publish BRAT-compatible GitHub prerelease
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$RELEASE_VERSION" \
+            --target "$GITHUB_SHA" \
+            --title "$RELEASE_VERSION" \
+            --prerelease \
+            --generate-notes \
+            packages/obsidian/main.js \
+            manifest.json \
+            packages/obsidian/styles.css
+      - name: Show published assets
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: gh release view "$RELEASE_VERSION" --json url,tagName,assets

@@ -1,4 +1,13 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  beforeEach,
+  afterEach,
+  vi,
+} from "vitest";
+import { azureRequestGate } from "./AzureRequestGate";
 import {
   azureCallTextToSpeech,
   listAzureVoices,
@@ -10,6 +19,19 @@ import { DEFAULT_SETTINGS } from "../player/TTSPluginSettings";
 
 // Mock the global fetch
 global.fetch = vi.fn();
+
+// A disposable in-memory test ledger, never a real Azure account.
+beforeAll(() => {
+  azureRequestGate.initialize(
+    {
+      month: new Date().toISOString().slice(0, 7),
+      characters: 0,
+      starts: [],
+      blockedUntil: 0,
+    },
+    async () => undefined,
+  );
+});
 
 describe("Azure TTS Model", () => {
   beforeEach(() => {

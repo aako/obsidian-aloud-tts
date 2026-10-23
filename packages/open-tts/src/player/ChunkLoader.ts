@@ -7,6 +7,12 @@ import {
 } from "../models/tts-model";
 import { AudioData } from "../models/tts-model";
 import { convertToPlayableFormat } from "../util/audioProcessing";
+import { hashAudioInputs } from "./AudioCache";
+
+const sharedRequests = new WeakMap<
+  AudioSystem,
+  Map<string, Promise<AudioData>>
+>();
 
 /** manages loading and caching of tracks */
 export class ChunkLoader {
@@ -116,12 +122,36 @@ export class ChunkLoader {
       text,
       options,
       requestedTime: Date.now(),
-      result: this.tryLoadTrack(text, options, 0, 3, context).catch((e) => {
+      result: this.sharedLoad(text, options, context).catch((e) => {
         this.destroyCachedAudio(audio);
         throw e;
       }),
     };
     return audio;
+  }
+
+  private sharedLoad(
+    text: string,
+    options: TTSModelOptions,
+    context: AudioTextContext,
+  ): Promise<AudioData> {
+    let requests = sharedRequests.get(this.system);
+    if (!requests) {
+      requests = new Map();
+      sharedRequests.set(this.system, requests);
+    }
+    const key = hashAudioInputs(text, options, "mp3");
+    const existing = requests.get(key);
+    if (existing) return existing;
+    const pending = this.tryLoadTrack(
+      text,
+      options,
+      0,
+      this.system.settings.modelProvider === "azure" ? 0 : 3,
+      context,
+    ).finally(() => requests!.delete(key));
+    requests.set(key, pending);
+    return pending;
   }
 
   private destroyCachedAudio(audio: CachedAudio): void {
@@ -144,10 +174,15 @@ export class ChunkLoader {
     const itemOptions: TTSModelOptions = item.options;
 
     this.backgroundActiveCount += 1; // Increment active *requests* count by 1
-    this.load(item.text, itemOptions, item.context).finally(() => {
-      this.backgroundActiveCount -= 1;
-      this.processBackgroundQueue(); // Check for more work
-    });
+    this.load(item.text, itemOptions, {
+      ...item.context,
+      request: { priority: "background" },
+    })
+      .catch(() => undefined)
+      .finally(() => {
+        this.backgroundActiveCount -= 1;
+        this.processBackgroundQueue(); // Check for more work
+      });
 
     return true; // Keep processor running if queue might still have items or requests are active
   }
@@ -208,6 +243,7 @@ export class ChunkLoader {
       options,
       this.system.settings,
       context,
+      context.request?.signal,
     );
     const playable = await convertToPlayableFormat(audio);
 

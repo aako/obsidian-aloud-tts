@@ -18,6 +18,7 @@ import { TTSErrorInfoDetails, TTSErrorInfoView } from "./PlayerView";
 import { OptionSelect } from "./settings/option-select";
 import { SettingSection } from "./settings/setting-components";
 import { AzureSettings } from "./settings/providers/provider-azure";
+import { GoogleChirpSettings } from "./settings/providers/provider-google-chirp";
 import { ElevenLabsSettings } from "./settings/providers/provider-elevenlabs";
 import { GeminiSettings } from "./settings/providers/provider-gemini";
 import { HumeSettings } from "./settings/providers/provider-hume";
@@ -33,6 +34,7 @@ const providerSettingsViews: Record<
   React.FC<{ store: TTSPluginSettingsStore }>
 > = {
   azure: AzureSettings,
+  google_chirp: GoogleChirpSettings,
   elevenlabs: ElevenLabsSettings,
   gemini: GeminiSettings,
   hume: HumeSettings,
@@ -141,6 +143,7 @@ const labels: Record<ModelProvider, string> = {
   openai: "OpenAI",
   openaicompat: "OpenAI Compatible (Advanced)",
   azure: "Azure Speech Services",
+  google_chirp: "Google Chirp 3 HD",
   elevenlabs: "ElevenLabs",
   gemini: "Google Gemini",
   hume: "Hume",

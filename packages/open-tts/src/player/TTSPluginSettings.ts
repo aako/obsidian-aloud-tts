@@ -12,6 +12,12 @@ export type TTSPluginSettings = {
   playbackSpeed: number;
   cacheType: "local" | "vault";
   cacheDurationMillis: number;
+  persistentCacheFolder: string;
+  persistentCacheMaxMB: number;
+  azureMonthlyBudget: number;
+  googleChirpMonthlyBudget: number;
+  /** Experimental extra end-of-sentence pause, in milliseconds. 0 preserves existing audio. */
+  googleChirpSentencePauseMs: number;
   showPlayerView: PlayerViewMode;
   showEditorActionButton: boolean;
   autoScrollPlayerView: boolean;
@@ -27,7 +33,8 @@ export type TTSPluginSettings = {
   MinimaxModelConfig &
   FishModelConfig &
   InworldModelConfig &
-  PollyModelConfig);
+  PollyModelConfig &
+  GoogleChirpModelConfig);
 
 export interface InworldModelConfig {
   /** the API key to use */
@@ -102,6 +109,12 @@ export interface ElevenLabsModelConfig {
   elevenlabs_similarity?: number;
 }
 
+export interface GoogleChirpModelConfig {
+  googleChirpApiKey: string;
+  googleChirpVoice: string;
+  googleChirpFavoriteVoices: string[];
+}
+
 export interface AzureModelConfig {
   /** the API key to use */
   azure_apiKey: string;
@@ -109,6 +122,8 @@ export interface AzureModelConfig {
   azure_region: string;
   /** the voice to use. Required */
   azure_voice: string;
+  /** Azure voice IDs pinned for quick access in the picker. */
+  azure_favoriteVoices: string[];
   /** the output format for the audio */
   azure_outputFormat: string;
 }
@@ -195,6 +210,7 @@ export const modelProviders = [
   "openai",
   "openaicompat",
   "azure",
+  "google_chirp",
   "elevenlabs",
   "gemini",
   "hume",
@@ -211,6 +227,14 @@ export const DEFAULT_SETTINGS: TTSPluginSettings = {
   playbackSpeed: 1.0,
   cacheDurationMillis: 1000 * 60 * 60 * 24 * 7, // 7 days
   cacheType: "local",
+  persistentCacheFolder: "_Aloud Audio Cache",
+  persistentCacheMaxMB: 1024,
+  azureMonthlyBudget: 450000,
+  googleChirpMonthlyBudget: 900000,
+  googleChirpSentencePauseMs: 0,
+  googleChirpApiKey: "",
+  googleChirpVoice: "en-US-Chirp3-HD-Aoede",
+  googleChirpFavoriteVoices: [],
   showPlayerView: "always-mobile",
   showEditorActionButton: true,
   autoScrollPlayerView: true,
@@ -246,6 +270,7 @@ export const DEFAULT_SETTINGS: TTSPluginSettings = {
   azure_apiKey: "",
   azure_region: "eastus",
   azure_voice: "en-US-JennyNeural",
+  azure_favoriteVoices: [],
   azure_outputFormat: "audio-24khz-96kbitrate-mono-mp3",
 
   // minimax

@@ -14,10 +14,14 @@ import {
 import * as React from "react";
 import { createRoot, Root } from "react-dom/client";
 import { IsPlaying } from "./components/ObsidianIsPlaying";
-import { AudioStore } from "open-tts";
+import { AudioStore, AudioTextOptions } from "open-tts";
 import { hashString } from "open-tts";
 import { TTSPluginSettingsStore } from "open-tts";
 import { TTSEditorBridge } from "@open-tts/ui";
+import { readingFingerprint } from "./ReadingProgress";
+import type { ReadingProgress } from "./ReadingProgress";
+import type { ArticleCache, ArticleJob } from "./ArticleCache";
+import { ArticleCacheModal } from "./components/ArticleCacheModal";
 
 export interface ObsidianBridgeSpecifics {
   activeObsidianEditor: Editor | undefined;
@@ -35,7 +39,16 @@ export interface ObsidianBridge
   ) => void;
   playDetached: (text: string, filename?: string) => void;
   playSelection: () => void;
+  playDocument(): Promise<void>;
+  openArticleCache(
+    scope?: "document" | "selection" | "saved" | "manage",
+  ): Promise<void>;
   playClipboard: () => Promise<void>;
+  playSavedReading: (opts: AudioTextOptions) => Promise<void>;
+  hasSavedReading(): boolean;
+  resumeSavedReading(): Promise<void>;
+  startOver(): Promise<void>;
+  readingProgressLabel(): string | undefined;
 }
 
 interface PdfTextItem {
@@ -74,6 +87,7 @@ type PdfFileView = {
 
 /** observable class for obsidian related implementation to activate audio */
 export class ObsidianBridgeImpl implements ObsidianBridge {
+  private readingActionPending = false;
   // the editor that was last interacted with for playing audio.
   active: MarkdownFileInfo | null = null;
   activeEditorView: MarkdownView | null;
@@ -107,6 +121,8 @@ export class ObsidianBridgeImpl implements ObsidianBridge {
     private app: App,
     private audio: AudioStore,
     private settings: TTSPluginSettingsStore,
+    private progress?: ReadingProgress,
+    private articleCache?: ArticleCache,
   ) {
     mobx.makeObservable(this, {
       active: mobx.observable.ref,
@@ -301,9 +317,10 @@ export class ObsidianBridgeImpl implements ObsidianBridge {
     if (tabElement) {
       const inner = tabElement.querySelector(".workspace-tab-header-inner");
       if (inner) {
-        inner.querySelector(".tts-tab-playing-icon")?.remove();
+        inner.querySelector(".aloud-ios-fork-tab-playing-icon")?.remove();
         const iconSpan = document.createElement("span");
-        iconSpan.className = "tts-tab-playing-icon";
+        iconSpan.className =
+          "tts-tab-playing-icon aloud-ios-fork-tab-playing-icon";
         this._playingIconRoot = createRoot(iconSpan);
         this._playingIconRoot.render(
           React.createElement(IsPlaying, {
@@ -401,6 +418,135 @@ export class ObsidianBridgeImpl implements ObsidianBridge {
       });
   }
 
+  async playSavedReading(opts: AudioTextOptions): Promise<void> {
+    this._setActiveEditor();
+    await this.audio.startPlayer(opts);
+  }
+
+  hasSavedReading(): boolean {
+    return !!this.progress?.latest;
+  }
+
+  readingProgressLabel(): string | undefined {
+    const unit =
+      this.settings.settings.chunkType === "paragraph"
+        ? "paragraph"
+        : "sentence group";
+    const active = this.audio.activeText;
+    if (active && active.position >= 0) {
+      return `Live: ${unit} ${active.position + 1} of ${active.audio.chunks.length}`;
+    }
+    const saved = this.progress?.latest;
+    return saved ? `Saved: ${unit} ${saved.chunk + 1}` : undefined;
+  }
+
+  private async savedOptions(): Promise<AudioTextOptions | undefined> {
+    const saved = this.progress?.latest;
+    if (!saved) {
+      new Notice("No saved article yet.");
+      return undefined;
+    }
+    return this.optionsForSource(
+      saved.path,
+      saved.start,
+      saved.end,
+      saved.fingerprint,
+    );
+  }
+
+  private async optionsForSource(
+    path: string,
+    start: number,
+    end: number,
+    fingerprint: string,
+  ): Promise<AudioTextOptions | undefined> {
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!(file instanceof TFile)) {
+      new Notice("Saved article no longer exists.");
+      return undefined;
+    }
+    const text = (await this.app.vault.read(file)).slice(start, end);
+    if (readingFingerprint(text) !== fingerprint) {
+      new Notice("Article has changed; saved position is not safe to restore.");
+      return undefined;
+    }
+    return { filename: file.path, sourcePath: file.path, start, end, text };
+  }
+
+  async resumeSavedReading(): Promise<void> {
+    if (this.readingActionPending) return;
+    this.readingActionPending = true;
+    try {
+      const opts = await this.savedOptions();
+      if (!opts) return;
+      const position = this.progress?.positionFor(opts);
+      if (position == null) {
+        new Notice("The saved sentence no longer matches this article.");
+        return;
+      }
+      const file = this.app.vault.getAbstractFileByPath(opts.sourcePath!);
+      if (file instanceof TFile)
+        await this.app.workspace.getLeaf(false).openFile(file);
+      await this.playSavedReading({ ...opts, resumeChunkIndex: position });
+    } catch (error) {
+      console.warn("Aloud: saved reading could not resume", error);
+      new Notice(
+        "Couldn't resume the saved article. Check vault access and try again.",
+      );
+    } finally {
+      this.readingActionPending = false;
+    }
+  }
+
+  async startOver(): Promise<void> {
+    if (this.readingActionPending) return;
+    this.readingActionPending = true;
+    try {
+      const active = this.audio.activeText;
+      let opts: AudioTextOptions | undefined;
+      if (
+        active?.audio.sourcePath &&
+        active.audio.sourceFingerprint != null &&
+        active.audio.sourceStart != null &&
+        active.audio.sourceEnd != null
+      ) {
+        opts = await this.optionsForSource(
+          active.audio.sourcePath,
+          active.audio.sourceStart,
+          active.audio.sourceEnd,
+          active.audio.sourceFingerprint,
+        );
+      } else if (active) {
+        const text = active.audio.chunks.map((chunk) => chunk.rawText).join("");
+        if (text.trim()) {
+          opts = {
+            filename: active.audio.filename,
+            text,
+            start: 0,
+            end: text.length,
+          };
+        }
+      } else {
+        opts = await this.savedOptions();
+      }
+      if (!opts) return;
+      active?.pause(); // Stop the old timeline before clearing its MediaSource.
+      await this.progress?.resetToStart(opts);
+      // Recreate detached/PDF playback without losing its status-bar menu.
+      if (active && !active.audio.sourcePath) {
+        this.playDetached(opts.text, opts.filename);
+        return;
+      }
+      // startPlayer clears the MediaSource timeline: even chunk zero rewinds.
+      await this.playSavedReading({ ...opts, resumeChunkIndex: 0 });
+    } catch (error) {
+      console.warn("Aloud: Start Over failed", error);
+      new Notice("Couldn't restart reading. Check vault access and try again.");
+    } finally {
+      this.readingActionPending = false;
+    }
+  }
+
   playSelection(): void {
     const pdfView = this.getActivePdfView();
     if (pdfView) {
@@ -413,6 +559,86 @@ export class ObsidianBridgeImpl implements ObsidianBridge {
       this.triggerSelection(focused.file, focused.editor);
     } else {
       new Notice("Focus a file or select some text first to play");
+    }
+  }
+
+  async playDocument(): Promise<void> {
+    const view =
+      this.focusedEditorView ??
+      this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (!view?.editor) {
+      new Notice("Focus a note first to play the complete document.");
+      return;
+    }
+    const text = view.editor.getValue();
+    if (!text.trim()) return;
+    try {
+      await this.playSavedReading({
+        text,
+        filename: view.file?.path ?? "Untitled",
+        sourcePath: view.file?.path,
+        start: 0,
+        end: text.length,
+        resumeChunkIndex: 0,
+      });
+    } catch (error) {
+      console.warn("Aloud: document playback failed", error);
+      new Notice("Couldn't start document playback.");
+    }
+  }
+
+  async openArticleCache(
+    scope: "document" | "selection" | "saved" | "manage" = "document",
+  ): Promise<void> {
+    if (!this.articleCache) return;
+    try {
+      let opts: AudioTextOptions | undefined;
+      if (
+        scope === "saved" ||
+        (scope === "document" && !this.focusedEditorView?.editor)
+      )
+        opts = await this.savedOptions();
+      else if (scope !== "manage") {
+        const view = this.focusedEditorView;
+        if (!view?.editor || !view.file)
+          throw new Error("Focus a saved note first.");
+        const fullText = view.editor.getValue();
+        const selection =
+          scope === "selection" ? view.editor.getSelection() : "";
+        if (scope === "selection" && !selection.trim())
+          throw new Error("Select a passage first.");
+        const start =
+          scope === "selection"
+            ? view.editor.posToOffset(view.editor.getCursor("from"))
+            : 0;
+        const text = scope === "selection" ? selection : fullText;
+        opts = {
+          text,
+          start,
+          end: start + text.length,
+          filename: view.file.path,
+          sourcePath: view.file.path,
+        };
+      }
+      if (scope !== "manage" && !opts) return;
+      const job = opts ? await this.articleCache.prepare(opts) : undefined;
+      new ArticleCacheModal(
+        this.app,
+        this.articleCache,
+        this.settings,
+        job,
+        async (selected: ArticleJob) => {
+          if (!this.articleCache)
+            throw new Error("Cache manager is unavailable.");
+          await this.playSavedReading(
+            await this.articleCache.playbackOptions(selected),
+          );
+        },
+      ).open();
+    } catch (error) {
+      new Notice(
+        error instanceof Error ? error.message : "Couldn't open article cache.",
+      );
     }
   }
 
@@ -525,17 +751,18 @@ export class ObsidianBridgeImpl implements ObsidianBridge {
     const selection = editor.getRange(from, to);
     if (selection) {
       try {
-        player
-          .startPlayer({
-            text: selection,
-            filename:
-              [file?.path, file?.name].filter((x) => x).join("/") || "Untitled",
-            start,
-            end: start + selection.length,
-          })
-          .catch((ex) => {
-            console.error("Couldn't start player!", ex);
-          });
+        const opts: AudioTextOptions = {
+          text: selection,
+          filename:
+            [file?.path, file?.name].filter((x) => x).join("/") || "Untitled",
+          sourcePath: file?.path,
+          start,
+          end: start + selection.length,
+        };
+        opts.resumeChunkIndex = this.progress?.positionFor(opts);
+        player.startPlayer(opts).catch((ex) => {
+          console.error("Couldn't start player!", ex);
+        });
       } catch (ex) {
         console.error("Couldn't start player!", ex);
       }

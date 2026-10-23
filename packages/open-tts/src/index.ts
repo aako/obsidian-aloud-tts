@@ -1,5 +1,7 @@
 export * from "./marketing";
 export * from "./models/azure";
+export * from "./models/AzureRequestGate";
+export * from "./models/google-chirp";
 export * from "./models/elevenlabs";
 export * from "./models/fish";
 export * from "./models/gemini";
@@ -20,6 +22,7 @@ export * from "./player/AudioTextChunk";
 export * from "./player/CancellablePromise";
 export * from "./player/ChunkLoader";
 export * from "./player/ChunkPlayer";
+export * from "./player/ReadingFingerprint";
 export * from "./player/TTSActions";
 export * from "./player/TTSPluginSettings";
 export * from "./player/onMultiTextChanged";

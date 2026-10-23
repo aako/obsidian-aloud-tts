@@ -99,9 +99,10 @@ describe("TTSActions", () => {
   });
 
   describe("stop", () => {
-    it("should call player.destroy", () => {
+    it("should close the active track without destroying the store", () => {
       actions.stop();
-      expect(player.destroy).toHaveBeenCalled();
+      expect(player.closePlayer).toHaveBeenCalled();
+      expect(player.destroy).not.toHaveBeenCalled();
     });
   });
 
