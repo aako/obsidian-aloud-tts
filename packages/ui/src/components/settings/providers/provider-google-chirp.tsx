@@ -24,6 +24,7 @@ export const GoogleChirpSettings = observer(
         showValidation={true}
       />
       <GoogleChirpVoicePicker store={store} />
+      <GoogleChirpPacing store={store} />
       <div className="setting-item">
         <div className="setting-item-info">
           <div className="setting-item-name">
@@ -52,6 +53,45 @@ export const GoogleChirpSettings = observer(
       </div>
     </>
   ),
+);
+
+const GoogleChirpPacing = observer(
+  ({ store }: { store: TTSPluginSettingsStore }) => {
+    const value = store.settings.googleChirpSentencePauseMs ?? 0;
+    return (
+      <div className="setting-item">
+        <div className="setting-item-info">
+          <div className="setting-item-name">Extra pause between sentences</div>
+          <div className="setting-item-description">
+            {value === 0
+              ? "Off (reuse existing cached audio)."
+              : `${value} ms base; question marks and paragraph breaks get a slightly longer pause.`}{" "}
+            Uses preview Google SSML at synthesis time. Changes require fresh
+            synthesis, consume Google usage allowance, and might be ignored by
+            some voices at the end of a chunk. Test a short sample first.
+            Frequent previews may also wait behind the 12-requests/minute
+            limiter.
+          </div>
+        </div>
+        <div className="setting-item-control">
+          <input
+            type="range"
+            min="0"
+            max="1200"
+            step="50"
+            aria-label="Chirp sentence pause milliseconds"
+            value={value}
+            onChange={(event) => {
+              const next = Number(event.target.value);
+              if (Number.isSafeInteger(next) && next >= 0 && next <= 1200)
+                void store.updateSettings({ googleChirpSentencePauseMs: next });
+            }}
+          />
+          <span>{value} ms</span>
+        </div>
+      </div>
+    );
+  },
 );
 
 export const GoogleChirpVoicePicker = observer(

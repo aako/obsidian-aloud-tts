@@ -16,6 +16,8 @@ export type TTSPluginSettings = {
   persistentCacheMaxMB: number;
   azureMonthlyBudget: number;
   googleChirpMonthlyBudget: number;
+  /** Experimental extra end-of-sentence pause, in milliseconds. 0 preserves existing audio. */
+  googleChirpSentencePauseMs: number;
   showPlayerView: PlayerViewMode;
   showEditorActionButton: boolean;
   autoScrollPlayerView: boolean;
@@ -229,6 +231,7 @@ export const DEFAULT_SETTINGS: TTSPluginSettings = {
   persistentCacheMaxMB: 1024,
   azureMonthlyBudget: 450000,
   googleChirpMonthlyBudget: 900000,
+  googleChirpSentencePauseMs: 0,
   googleChirpApiKey: "",
   googleChirpVoice: "en-US-Chirp3-HD-Aoede",
   googleChirpFavoriteVoices: [],

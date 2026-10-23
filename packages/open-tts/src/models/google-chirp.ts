@@ -30,6 +30,52 @@ export function googleChirpBytes(text: string): number {
   return new TextEncoder().encode(text).byteLength;
 }
 
+// Chirp synchronous SSML is currently a Google Preview feature.
+// A trailing <break> MAY be trimmed by Google's synthesizer; validate on a
+// short sample before caching entire documents.
+const BASE_MODEL = "google-chirp3-hd-mp3-v1";
+const PAUSE_MODEL = /^google-chirp3-hd-mp3-v1-pause-(\d{1,4})$/;
+
+export function chirpPauseFromModel(model: string): number {
+  const match = model.match(PAUSE_MODEL);
+  const value = match ? Number(match[1]) : 0;
+  return Number.isSafeInteger(value) && value >= 0 && value <= 1200 ? value : 0;
+}
+
+export function chirpPauseDuration(text: string, baseMs: number): number {
+  if (!baseMs) return 0;
+  const end = text.trimEnd();
+  // Punctuation-aware durations: a question gets a slightly more reflective gap;
+  // a paragraph/ellipsis gets a longer one. Hard limit is 2,000 milliseconds.
+  const factor =
+    /\n\s*\n\s*$/.test(text) || /(\.{3,}|…)$/.test(end)
+      ? 1.65
+      : /[?？]["'’”)]*$/.test(end)
+        ? 1.35
+        : /[!！]["'’”)]*$/.test(end)
+          ? 1.15
+          : 1;
+  return Math.min(2000, Math.round((baseMs * factor) / 25) * 25);
+}
+
+function escapeSSML(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+export function chirpSynthesisInput(
+  text: string,
+  model: string,
+): { text: string } | { ssml: string } {
+  const ms = chirpPauseDuration(text, chirpPauseFromModel(model));
+  if (!ms) return { text };
+  return { ssml: `<speak>${escapeSSML(text)}<break time="${ms}ms"/></speak>` };
+}
+
 function requireVoice(value?: string): string {
   if (!value || !CHIRP_NAME.test(value)) {
     throw new Error("Select a Chirp 3 HD voice before synthesis.");
@@ -118,14 +164,16 @@ export async function googleChirpSynthesize(
   if (!options.apiKey?.trim())
     throw new Error("Google Cloud TTS API key is missing.");
   if (!text.trim()) throw new Error("Cannot synthesize empty text.");
-  if (googleChirpBytes(text) > 5000)
+  const synthesisInput = chirpSynthesisInput(text, options.model);
+  const requestText = "ssml" in synthesisInput ? synthesisInput.ssml : text;
+  if (googleChirpBytes(requestText) > 5000)
     throw new Error(
-      "Chirp 3 HD input exceeds Google's 5,000-byte limit. Use sentence chunking.",
+      "Chirp 3 HD input exceeds Google's 5,000-byte limit including SSML. Use sentence chunking.",
     );
   const locale = voice.split("-").slice(0, 2).join("-");
   signal ??= context.request?.signal;
   const body = JSON.stringify({
-    input: { text },
+    input: synthesisInput,
     voice: { languageCode: locale, name: voice },
     audioConfig: { audioEncoding: "MP3" },
   });
@@ -152,7 +200,8 @@ export async function googleChirpSynthesize(
           return mp3FromBase64(content);
         },
         {
-          characters: googleChirpCharacters(text),
+          // Conservatively reserve the complete SSML payload as an upper bound.
+          characters: googleChirpCharacters(requestText),
           budget:
             context.request?.budgetLimit ?? settings.googleChirpMonthlyBudget,
           priority: context.request?.priority,
@@ -178,7 +227,14 @@ export const googleChirpTTS: TTSModel = {
   convertToOptions: (settings): TTSModelOptions => ({
     apiKey: settings.googleChirpApiKey,
     apiUri: ENDPOINT,
-    model: "google-chirp3-hd-mp3-v1",
+    // Changing pauses creates a new audio cache key. Selecting zero restores
+    // the original ios.6 key and reuses all previously generated audio.
+    model:
+      Number.isSafeInteger(settings.googleChirpSentencePauseMs) &&
+      settings.googleChirpSentencePauseMs > 0 &&
+      settings.googleChirpSentencePauseMs <= 1200
+        ? `${BASE_MODEL}-pause-${settings.googleChirpSentencePauseMs}`
+        : BASE_MODEL,
     voice: settings.googleChirpVoice,
   }),
   validateConnection: async (settings) => {
