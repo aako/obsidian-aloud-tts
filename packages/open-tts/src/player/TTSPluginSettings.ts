@@ -16,6 +16,7 @@ export type TTSPluginSettings = {
   persistentCacheMaxMB: number;
   azureMonthlyBudget: number;
   googleChirpMonthlyBudget: number;
+  speechifyMonthlyBudget: number;
   /** Experimental extra end-of-sentence pause, in milliseconds. 0 preserves existing audio. */
   googleChirpSentencePauseMs: number;
   showPlayerView: PlayerViewMode;
@@ -34,7 +35,8 @@ export type TTSPluginSettings = {
   FishModelConfig &
   InworldModelConfig &
   PollyModelConfig &
-  GoogleChirpModelConfig);
+  GoogleChirpModelConfig &
+  SpeechifyModelConfig);
 
 export interface InworldModelConfig {
   /** the API key to use */
@@ -113,6 +115,12 @@ export interface GoogleChirpModelConfig {
   googleChirpApiKey: string;
   googleChirpVoice: string;
   googleChirpFavoriteVoices: string[];
+}
+
+export interface SpeechifyModelConfig {
+  speechifyApiKey: string;
+  speechifyModel: "simba-3.0" | "simba-3.2" | "simba-3.5";
+  speechifyVoice: string;
 }
 
 export interface AzureModelConfig {
@@ -211,6 +219,7 @@ export const modelProviders = [
   "openaicompat",
   "azure",
   "google_chirp",
+  "speechify",
   "elevenlabs",
   "gemini",
   "hume",
@@ -231,10 +240,14 @@ export const DEFAULT_SETTINGS: TTSPluginSettings = {
   persistentCacheMaxMB: 1024,
   azureMonthlyBudget: 450000,
   googleChirpMonthlyBudget: 900000,
+  speechifyMonthlyBudget: 0, // Explicit opt-in; Speechify starter credits are not monthly.
   googleChirpSentencePauseMs: 0,
   googleChirpApiKey: "",
   googleChirpVoice: "en-US-Chirp3-HD-Aoede",
   googleChirpFavoriteVoices: [],
+  speechifyApiKey: "",
+  speechifyModel: "simba-3.2",
+  speechifyVoice: "geffen_32",
   showPlayerView: "always-mobile",
   showEditorActionButton: true,
   autoScrollPlayerView: true,

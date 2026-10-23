@@ -6,6 +6,7 @@ import {
   TTSPluginSettingsStore,
   azureRequestGate,
   googleChirpRequestGate,
+  speechifyRequestGate,
 } from "open-tts";
 import { ArticleCache, ArticleJob, CacheEstimate } from "../ArticleCache";
 import { cacheFolder } from "../PersistentVaultCache";
@@ -64,12 +65,23 @@ export const ArticleCacheView = observer(
       settings.settings.persistentCacheFolder,
     );
     const google = settings.settings.modelProvider === "google_chirp";
-    const serviceName = google ? "Google Chirp" : "Azure";
-    const serviceGate = google ? googleChirpRequestGate : azureRequestGate;
+    const speechify = settings.settings.modelProvider === "speechify";
+    const serviceName = speechify
+      ? "Speechify"
+      : google
+        ? "Google Chirp"
+        : "Azure";
+    const serviceGate = speechify
+      ? speechifyRequestGate
+      : google
+        ? googleChirpRequestGate
+        : azureRequestGate;
     const [budget, setBudget] = React.useState(
-      google
-        ? settings.settings.googleChirpMonthlyBudget
-        : settings.settings.azureMonthlyBudget,
+      speechify
+        ? settings.settings.speechifyMonthlyBudget
+        : google
+          ? settings.settings.googleChirpMonthlyBudget
+          : settings.settings.azureMonthlyBudget,
     );
     const [limit, setLimit] = React.useState(
       settings.settings.persistentCacheMaxMB,
@@ -142,9 +154,9 @@ export const ArticleCacheView = observer(
               {serviceGate.used.toLocaleString()} {serviceName} characters.
               Estimated remaining local allowance:{" "}
               {Math.max(0, budget - serviceGate.used).toLocaleString()}. This is
-              not Azure billing; requests on other devices/apps and prior usage
-              are unknown. Attempts and retries are counted conservatively.
-              Generate on one device at a time.
+              not provider billing; requests on other devices/apps and prior
+              usage are unknown. Attempts and retries are counted
+              conservatively. Generate on one device at a time.
             </p>
             {estimate?.exceedsBudget && (
               <label>
@@ -158,7 +170,7 @@ export const ArticleCacheView = observer(
                   0,
                   estimate.additionalCharacters - estimate.remaining,
                 ).toLocaleString()}{" "}
-                characters. This does not change my Azure plan.
+                characters. This does not change my provider account or plan.
               </label>
             )}
             <div className="tts-cache-actions">
@@ -281,12 +293,16 @@ export const ArticleCacheView = observer(
               await settings.updateSettings({
                 persistentCacheFolder: next,
                 persistentCacheMaxMB: limit,
-                azureMonthlyBudget: google
-                  ? settings.settings.azureMonthlyBudget
-                  : budget,
+                azureMonthlyBudget:
+                  !google && !speechify
+                    ? budget
+                    : settings.settings.azureMonthlyBudget,
                 googleChirpMonthlyBudget: google
                   ? budget
                   : settings.settings.googleChirpMonthlyBudget,
+                speechifyMonthlyBudget: speechify
+                  ? budget
+                  : settings.settings.speechifyMonthlyBudget,
               });
               await manager.load();
               setId(manager.jobs[0]?.id ?? "");

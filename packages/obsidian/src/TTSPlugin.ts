@@ -14,6 +14,7 @@ import {
   azureRequestGate,
   validAzureLedger,
   googleChirpRequestGate,
+  speechifyRequestGate,
 } from "open-tts";
 import { AloudMediaSession } from "./MediaSessionController";
 import { REGISTRY } from "open-tts";
@@ -380,6 +381,48 @@ export default class TTSPlugin extends Plugin {
       );
       new Notice(
         "Aloud: Google Chirp ledger unavailable. Google synthesis is disabled; cached audio can still play.",
+      );
+    }
+    // Speechify reservations are independent from Azure and Google. Default
+    // synthesis budget is zero until the user explicitly chooses a local cap.
+    const speechifyLedgerBase = `${ledgerFolder}/speechify-usage`;
+    try {
+      const saved = await readSnapshot(
+        adapter,
+        speechifyLedgerBase,
+        validAzureLedger,
+      );
+      let generation = saved?.generation ?? 0;
+      speechifyRequestGate.initialize(
+        saved?.value ?? {
+          month: new Date().toISOString().slice(0, 7),
+          characters: 0,
+          starts: [],
+          blockedUntil: 0,
+        },
+        async (value) => {
+          await ensureFolder(adapter, ledgerFolder);
+          await writeSnapshot(
+            adapter,
+            speechifyLedgerBase,
+            ++generation,
+            value,
+          );
+          await writeSnapshot(
+            adapter,
+            speechifyLedgerBase,
+            ++generation,
+            value,
+          );
+        },
+      );
+    } catch (error) {
+      console.error(
+        "Aloud: Speechify usage ledger unavailable; synthesis disabled",
+        error,
+      );
+      new Notice(
+        "Aloud: Speechify usage ledger unavailable. Synthesis is disabled; cached audio remains playable.",
       );
     }
     const persistent = new PersistentVaultCache(
