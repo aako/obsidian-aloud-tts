@@ -50,6 +50,55 @@ jobs:
           test -s packages/obsidian/styles.css
           test -s manifest.json
 
+      - name: Stage verified PR test plugin
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="$RUNNER_TEMP/aloud-pr-plugin"
+          mkdir -p "$stage"
+          cp packages/obsidian/main.js "$stage/main.js"
+          cp manifest.json "$stage/manifest.json"
+          cp packages/obsidian/styles.css "$stage/styles.css"
+          node - "$stage/manifest.json" <<'NODE'
+          const fs = require('node:fs');
+          const manifest = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          if (manifest.id !== 'aloud-ios-fork' || !/^\d+\.\d+\.\d+-ios\.\d+$/.test(manifest.version)) {
+            throw new Error('Unexpected test plugin identity or version');
+          }
+          NODE
+          (cd "$stage" && sha256sum main.js manifest.json styles.css)
+
+      - name: Upload PR-only Obsidian test plugin
+        if: github.event_name == 'pull_request'
+        id: pr_plugin
+        uses: actions/upload-artifact@v4
+        with:
+          name: aloud-pr-${{ github.event.pull_request.number }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/aloud-pr-plugin/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Show PR test instructions
+        if: github.event_name == 'pull_request'
+        env:
+          PR_PLUGIN_URL: ${{ steps.pr_plugin.outputs.artifact-url }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          {
+            echo '## Aloud test plugin for this PR'
+            echo
+            echo "[Download the verified PR test ZIP]($PR_PLUGIN_URL)"
+            echo
+            echo "Source head: $PR_HEAD_SHA. Artifact expires after 14 days."
+            echo
+            echo 'Extract main.js, manifest.json and styles.css into a **separate test vault**:'
+            echo '`<test-vault>/.obsidian/plugins/aloud-ios-fork/`'
+            echo 'Enable the plugin and restart Obsidian. Do not overwrite your everyday vault.'
+            echo 'This test artifact is **not** a published release or BRAT update.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   publish:
     name: Publish explicitly approved release
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
