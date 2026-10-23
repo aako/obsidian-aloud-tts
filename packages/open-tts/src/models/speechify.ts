@@ -47,15 +47,30 @@ async function speechifyHttpRequest(
 ): Promise<SpeechifyHttpResponse> {
   if (request.signal?.aborted)
     throw new DOMException("Speechify request cancelled.", "AbortError");
-  if (speechifyNativeTransport) return speechifyNativeTransport(request);
-  // The standalone web app continues to use normal fetch; only Obsidian
-  // installs its native requestUrl transport, which avoids WebView CORS.
-  return fetch(request.url, {
-    method: request.method,
-    headers: request.headers,
-    ...(request.body !== undefined ? { body: request.body } : {}),
-    ...(request.signal ? { signal: request.signal } : {}),
-  });
+  try {
+    if (speechifyNativeTransport)
+      return await speechifyNativeTransport(request);
+    // Other hosts retain browser fetch. Obsidian installs requestUrl at startup.
+    return await fetch(request.url, {
+      method: request.method,
+      headers: request.headers,
+      ...(request.body !== undefined ? { body: request.body } : {}),
+      ...(request.signal ? { signal: request.signal } : {}),
+    });
+  } catch (error) {
+    if (request.signal?.aborted)
+      throw new DOMException("Speechify request cancelled.", "AbortError");
+    if (error instanceof TTSErrorInfo) throw error;
+    // Native network errors sometimes contain URLs, credentials or private
+    // response content. Do not display their raw messages in Obsidian.
+    const category =
+      error instanceof Error && /^[a-z][a-z0-9]{0,39}$/i.test(error.name)
+        ? error.name
+        : "UnknownError";
+    throw new TTSErrorInfo(
+      `Speechify HTTP transport failed (${category}). No automatic retry was sent.`,
+    );
+  }
 }
 
 export type SpeechifyModel = "simba-3.0" | "simba-3.2" | "simba-3.5";
@@ -88,6 +103,9 @@ async function speechifyError(response: SpeechifyHttpResponse): Promise<never> {
   } catch {
     // Non-JSON responses are normal for some transient API failures.
   }
+  const requestId = response.headers?.get("Speechify-Request-Id");
+  if (requestId && /^[a-z0-9._:-]{1,80}$/i.test(requestId))
+    message += `; request ${requestId}`;
   throw new TTSErrorInfo(message, undefined, response.status);
 }
 
@@ -153,7 +171,12 @@ export async function listSpeechifyVoices(
   throw new Error("Speechify voice catalog exceeded pagination limit.");
 }
 
-/** One complete streamed MP3 per existing Aloud text chunk; no auto-retries. */
+/**
+ * Aloud already buffers whole sentence chunks. Use Speechify's complete JSON
+ * response for ordinary (<=2000-character) chunks: native Obsidian requestUrl
+ * cannot reliably collect every provider's chunked HTTP transfer. Larger
+ * chunks retain the original streaming route. Neither path auto-retries.
+ */
 export async function speechifySynthesize(
   text: string,
   options: TTSModelOptions,
@@ -175,7 +198,7 @@ export async function speechifySynthesize(
   return speechifyRequestGate.request(
     async () => {
       const response = await speechifyHttpRequest({
-        url: `${ENDPOINT}/audio/stream`,
+        url: `${ENDPOINT}/audio/${characters <= 2000 ? "speech" : "stream"}`,
         method: "POST",
         headers: {
           Authorization: `Bearer ${options.apiKey}`,
@@ -186,16 +209,57 @@ export async function speechifySynthesize(
           input: text,
           voice_id: options.voice,
           model: options.model,
+          ...(characters <= 2000 ? { audio_format: "mp3" } : {}),
         }),
         ...(signal ? { signal } : {}),
       });
       if (!response.ok) return speechifyError(response);
+      if (characters <= 2000) {
+        let body: unknown;
+        try {
+          body = await response.json();
+        } catch {
+          throw new TTSErrorInfo("Speechify returned invalid speech JSON.");
+        }
+        if (
+          !body ||
+          typeof body !== "object" ||
+          !("audio_data" in body) ||
+          !("audio_format" in body)
+        )
+          throw new TTSErrorInfo("Speechify response contains no audio_data.");
+        const result = body as { audio_data: unknown; audio_format: unknown };
+        if (
+          result.audio_format !== "mp3" ||
+          typeof result.audio_data !== "string"
+        )
+          throw new TTSErrorInfo(
+            "Speechify returned an unexpected audio format.",
+          );
+        try {
+          const binary = atob(result.audio_data);
+          if (binary.length < 4) throw new Error("Empty or truncated MP3");
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++)
+            bytes[i] = binary.charCodeAt(i);
+          return { data: bytes.buffer, format: "mp3" };
+        } catch {
+          throw new TTSErrorInfo("Speechify returned invalid Base64 MP3 data.");
+        }
+      }
       const contentType = response.headers?.get("Content-Type") ?? "";
       if (contentType && !/^audio\/mpeg(?:;|$)/i.test(contentType))
-        throw new Error("Speechify did not return an MP3 response.");
-      const audio = await response.arrayBuffer();
+        throw new TTSErrorInfo("Speechify streaming response was not MP3.");
+      let audio: ArrayBuffer;
+      try {
+        audio = await response.arrayBuffer();
+      } catch {
+        throw new TTSErrorInfo(
+          "Speechify MP3 stream could not be read by Obsidian.",
+        );
+      }
       if (!audio.byteLength)
-        throw new Error("Speechify returned an empty MP3 stream.");
+        throw new TTSErrorInfo("Speechify returned an empty MP3 stream.");
       return { data: audio, format: "mp3" };
     },
     {

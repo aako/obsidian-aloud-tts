@@ -47,17 +47,20 @@ describe("Speechify streaming", () => {
             get: (name) =>
               name.toLowerCase() === "content-type" ? "audio/mpeg" : null,
           },
-          json: async () => ({
-            voices: [
-              {
-                id: "geffen_32",
-                display_name: "Geffen",
-                locale: "en-US",
-                gender: "male",
-              },
-            ],
-            has_more: false,
-          }),
+          json: async () =>
+            request.method === "GET"
+              ? {
+                  voices: [
+                    {
+                      id: "geffen_32",
+                      display_name: "Geffen",
+                      locale: "en-US",
+                      gender: "male",
+                    },
+                  ],
+                  has_more: false,
+                }
+              : { audio_format: "mp3", audio_data: "//uQAQ==" },
           arrayBuffer: async () =>
             new Uint8Array([0xff, 0xfb, 0x90, 0x01]).buffer,
         };
@@ -72,12 +75,13 @@ describe("Speechify streaming", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(calls.map((request) => request.method)).toEqual(["GET", "POST"]);
     expect(calls[0].url).toContain("locale=en-US");
-    expect(calls[1].url).toBe("https://api.speechify.ai/v1/audio/stream");
+    expect(calls[1].url).toBe("https://api.speechify.ai/v1/audio/speech");
     expect(calls[1].headers.Authorization).toBe("Bearer test-only-key");
     expect(JSON.parse(String(calls[1].body))).toEqual({
       input: "Hello!",
       voice_id: "geffen_32",
       model: "simba-3.2",
+      audio_format: "mp3",
     });
     expect(speechifyRequestGate.used).toBe(6);
   });
@@ -107,7 +111,7 @@ describe("Speechify streaming", () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
       headers: { get: () => "audio/mpeg" },
-      arrayBuffer: async () => new Uint8Array([0xff, 0xfb, 0x90, 0x01]).buffer,
+      json: async () => ({ audio_format: "mp3", audio_data: "//uQAQ==" }),
     } as unknown as Response);
     const audio = await speechifySynthesize("Hello!", options, settings);
     expect(audio.format).toBe("mp3");
@@ -116,7 +120,7 @@ describe("Speechify streaming", () => {
     );
     expect(speechifyRequestGate.used).toBe(6);
     const [url, request] = fetchSpy.mock.calls[0];
-    expect(url).toBe("https://api.speechify.ai/v1/audio/stream");
+    expect(url).toBe("https://api.speechify.ai/v1/audio/speech");
     const config = request as RequestInit;
     expect(config.headers).toMatchObject({
       Authorization: "Bearer test-only-key",
@@ -126,6 +130,7 @@ describe("Speechify streaming", () => {
       input: "Hello!",
       voice_id: "geffen_32",
       model: "simba-3.2",
+      audio_format: "mp3",
     });
   });
 
@@ -159,7 +164,7 @@ describe("Speechify streaming", () => {
       .mockResolvedValueOnce({
         ok: true,
         headers: { get: () => "application/json" },
-        arrayBuffer: async () => new ArrayBuffer(0),
+        json: async () => ({ audio_format: "mp3", audio_data: "" }),
       } as unknown as Response);
     await expect(speechifySynthesize("One", options, settings)).rejects.toThrow(
       "402",
@@ -169,6 +174,33 @@ describe("Speechify streaming", () => {
     );
     expect(fetchSpy).toHaveBeenCalledTimes(2);
     expect(speechifyRequestGate.used).toBe(6);
+  });
+
+  it("retains raw MP3 streaming for long chunks, without a second request", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      headers: { get: () => "audio/mpeg" },
+      arrayBuffer: async () => new Uint8Array([0xff, 0xfb, 0x90, 1]).buffer,
+    } as unknown as Response);
+    const longText = "A".repeat(2001);
+    const audio = await speechifySynthesize(longText, options, {
+      ...settings,
+      speechifyMonthlyBudget: 3000,
+    });
+    expect(audio.format).toBe("mp3");
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy.mock.calls[0][0]).toBe(
+      "https://api.speechify.ai/v1/audio/stream",
+    );
+  });
+
+  it("turns native transport exceptions into safe diagnostic errors", async () => {
+    configureSpeechifyTransport(async () => {
+      throw new TypeError("private-secret-value");
+    });
+    await expect(
+      speechifySynthesize("Test", options, settings),
+    ).rejects.toThrow("Speechify HTTP transport failed (TypeError)");
   });
 
   it("has unique cache identities for different voices and models", () => {

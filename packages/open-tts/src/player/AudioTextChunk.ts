@@ -124,6 +124,18 @@ export class AudioTextChunk {
     this.failed = true;
     if (failureInfo instanceof TTSErrorInfo) {
       this.failureInfo = failureInfo;
+    } else {
+      // The UI previously replaced every non-TTSErrorInfo exception with
+      // "unknown". Preserve its error category, never its potentially secret
+      // message. The original exception is logged by ChunkLoader.
+      const category =
+        failureInfo instanceof Error &&
+        /^[a-z][a-z0-9]{0,39}$/i.test(failureInfo.name)
+          ? failureInfo.name
+          : "UnknownError";
+      this.failureInfo = new TTSErrorInfo(
+        `Audio processing failed (${category}); see Obsidian developer console.`,
+      );
     }
     this.loading = false;
   }

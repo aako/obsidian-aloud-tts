@@ -32,6 +32,10 @@ This is the durable project handover, not a substitute for reading the current c
 - The request is issued **once**, directly through the selected transport. A failed or interrupted POST is never retried automatically, because generation might already have been billed.
 - This change needs a short real-key playback and voice-catalog test in the existing Obsidian vault after publication; mocked tests do not establish live Speechify connectivity.
 
+## Speechify Playback Diagnostics (Candidate ios.11)
+
+Short Speechify chunks use the documented complete JSON MP3 endpoint rather than HTTP chunked transfer; long chunks retain stream mode. Native transport and decode failures provide error categories without revealing raw response content or keys. No implicit retry or cache migration. Verify on a real iPhone before calling the defect fixed.
+
 ## Prioritized Risk Register — Investigation Needed
 
 1. **Incomplete cache identity:** Audit every provider. ElevenLabs stability/similarity parameters and OpenAI-compatible response format are examples of audio-affecting options absent from the current common hash.
