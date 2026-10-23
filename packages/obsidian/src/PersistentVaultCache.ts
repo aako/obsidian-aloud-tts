@@ -105,6 +105,10 @@ function validReference(value: unknown): value is ChunkReference {
 
 /** Permanent read-through storage; expiry never removes article audio. */
 export class PersistentVaultCache implements AudioCache {
+  // Coordinate automatic playback saves with explicit article-precache saves.
+  // One instance per vault avoids duplicate hash-named writes and quota races.
+  private saveTail: Promise<void> = Promise.resolve();
+
   constructor(
     readonly adapter: DataAdapter,
     private folderSetting: () => string,
@@ -144,7 +148,19 @@ export class PersistentVaultCache implements AudioCache {
     }
   }
 
-  async saveAudio(
+  saveAudio(
+    text: string,
+    settings: TTSModelOptions,
+    audio: AudioData,
+  ): Promise<void> {
+    const task = this.saveTail.then(() =>
+      this.writeAudio(text, settings, audio),
+    );
+    this.saveTail = task.catch(() => undefined);
+    return task;
+  }
+
+  private async writeAudio(
     text: string,
     settings: TTSModelOptions,
     audio: AudioData,

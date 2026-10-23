@@ -47,7 +47,7 @@ export default class TTSPlugin extends Plugin {
 
   system: AudioSystem;
   bridge: ObsidianBridge;
-  cache: { destroy: () => void } | undefined;
+  cache: { destroy: () => void | Promise<void> } | undefined;
   editorAction: TTSEditorAction | undefined;
   detachedPlayerHost: DetachedPlayerHost | undefined;
   private _playerSyncDisposer: (() => void) | undefined;
@@ -309,7 +309,7 @@ export default class TTSPlugin extends Plugin {
     this.player?.destroy();
     this.audio?.destroy();
     this.bridge?.destroy();
-    this.cache?.destroy();
+    await this.cache?.destroy();
   }
 
   async loadSettings() {

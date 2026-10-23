@@ -33,7 +33,6 @@ export class ChunkPlayer {
 
   private cancelDemand: { cancel: () => void } | undefined = undefined;
   private cancelMonitorText: { cancel: () => void } | undefined = undefined;
-  private cancelSettingsChange: { cancel: () => void } | undefined = undefined;
   private chunkLoader: ChunkLoader;
 
   constructor({
@@ -197,11 +196,6 @@ export class ChunkPlayer {
           )
         : undefined;
       this.cancelMonitorText = loopMonitorTextForChanges();
-      this.cancelSettingsChange = this._whenSettingsChange().thenCancellable(
-        () => {
-          toReset = { all: true };
-        },
-      );
       const [start, end] = getLoadedRange(this.activeAudioText);
       const transitionType = await this._onAudioAudioChanged(foreground);
       if (this.isDestroyed) return;
@@ -291,6 +285,11 @@ export class ChunkPlayer {
             toReset = { all: true };
           }
         }
+      } else if (transitionType === "settings-changed") {
+        // Discard the old provider/voice/pacing audio at the SAME sentence.
+        // The next iteration cancels stale chunk loads and rebuilds the buffer
+        // with fresh model options (including a distinct audio cache key).
+        toReset = { all: true };
       } else if (transitionType === "play-paused") {
         // just reset the loop to re-watch the state
       }
@@ -298,8 +297,6 @@ export class ChunkPlayer {
   }
 
   _deactivate() {
-    this.cancelSettingsChange?.cancel();
-    this.cancelSettingsChange = undefined;
     this.cancelDemand?.cancel();
     this.cancelDemand = undefined;
     this.cancelMonitorText?.cancel();

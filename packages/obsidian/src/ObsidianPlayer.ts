@@ -11,13 +11,44 @@ export function configurableAudioCache(
   app: App,
   settings: TTSPluginSettingsStore,
   persistent?: PersistentVaultCache,
-): AudioCache & { destroy(): void } {
+): AudioCache & { destroy(): Promise<void> } {
   const createCache = (): AudioCache =>
     settings.settings.cacheType === "vault"
       ? obsidianFileVault(app)
       : new IndexedDBAudioStorage();
 
   let active: AudioCache = createCache();
+  // iCloud writes must never hold up playback. Serialize and deduplicate them;
+  // the article pre-cache worker can still explicitly await its own verified write.
+  let sharedSaveTail: Promise<void> = Promise.resolve();
+  const pendingSharedKeys = new Set<string>();
+  const reportedErrors = new Set<string>();
+
+  function enqueueSharedSave(
+    text: string,
+    options: TTSModelOptions,
+    audio: AudioData,
+  ): void {
+    const sharedCache = persistent;
+    if (!sharedCache || audio.format !== "mp3") return;
+    const key = hashAudioInputs(text, options, audio.format);
+    if (pendingSharedKeys.has(key)) return;
+    pendingSharedKeys.add(key);
+    const queued = sharedSaveTail
+      .then(() => sharedCache.saveAudio(text, options, audio))
+      .catch((error: unknown) => {
+        const reason = error instanceof Error ? error.message : String(error);
+        if (!reportedErrors.has(reason)) {
+          reportedErrors.add(reason);
+          console.warn(
+            "Aloud: shared vault cache save failed; audio remains in the local playback cache.",
+            error,
+          );
+        }
+      })
+      .finally(() => pendingSharedKeys.delete(key));
+    sharedSaveTail = queued.then(() => undefined);
+  }
 
   const cancelReaction = mobx.reaction(
     () => settings.settings.cacheType,
@@ -57,7 +88,10 @@ export function configurableAudioCache(
       settings: TTSModelOptions,
       audio: AudioData,
     ): Promise<void> {
-      return active.saveAudio(text, settings, audio);
+      // Never wait for iCloud hashing and file writes in the playback pipeline.
+      // Existing ios.7 local-cache semantics remain intact as the first write.
+      await active.saveAudio(text, settings, audio);
+      enqueueSharedSave(text, settings, audio);
     },
     async expire(ageInMillis = 1000 * 60 * 60 * 8): Promise<void> {
       if (settings.settings.cacheType === "vault") return;
@@ -67,8 +101,10 @@ export function configurableAudioCache(
       return active.getStorageSize();
     },
 
-    destroy() {
+    async destroy() {
       cancelReaction();
+      // Drain queued writes on normal plugin unload rather than abandon them.
+      await sharedSaveTail;
     },
   };
 }
