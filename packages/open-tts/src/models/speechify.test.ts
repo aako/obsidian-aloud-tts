@@ -5,6 +5,9 @@ import {
   speechifySynthesize,
   speechifyRequestGate,
   speechifyTextToSpeech,
+  configureSpeechifyTransport,
+  type SpeechifyHttpRequest,
+  type SpeechifyHttpResponse,
 } from "./speechify";
 
 const settings = {
@@ -18,6 +21,7 @@ const options = speechifyTextToSpeech.convertToOptions(settings);
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  configureSpeechifyTransport();
   speechifyRequestGate.initialize(
     {
       month: new Date().toISOString().slice(0, 7),
@@ -30,6 +34,75 @@ beforeEach(() => {
 });
 
 describe("Speechify streaming", () => {
+  it("routes both catalog and MP3 through an injected native transport, never browser fetch", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const calls: SpeechifyHttpRequest[] = [];
+    configureSpeechifyTransport(
+      async (request): Promise<SpeechifyHttpResponse> => {
+        calls.push(request);
+        return {
+          ok: true,
+          status: 200,
+          headers: {
+            get: (name) =>
+              name.toLowerCase() === "content-type" ? "audio/mpeg" : null,
+          },
+          json: async () => ({
+            voices: [
+              {
+                id: "geffen_32",
+                display_name: "Geffen",
+                locale: "en-US",
+                gender: "male",
+              },
+            ],
+            has_more: false,
+          }),
+          arrayBuffer: async () =>
+            new Uint8Array([0xff, 0xfb, 0x90, 0x01]).buffer,
+        };
+      },
+    );
+    expect(
+      await listSpeechifyVoices("test-only-key", "simba-3.2"),
+    ).toHaveLength(1);
+    expect(
+      (await speechifySynthesize("Hello!", options, settings)).format,
+    ).toBe("mp3");
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(calls.map((request) => request.method)).toEqual(["GET", "POST"]);
+    expect(calls[0].url).toContain("locale=en-US");
+    expect(calls[1].url).toBe("https://api.speechify.ai/v1/audio/stream");
+    expect(calls[1].headers.Authorization).toBe("Bearer test-only-key");
+    expect(JSON.parse(String(calls[1].body))).toEqual({
+      input: "Hello!",
+      voice_id: "geffen_32",
+      model: "simba-3.2",
+    });
+    expect(speechifyRequestGate.used).toBe(6);
+  });
+
+  it("reports the native HTTP error rather than retrying a billable request", async () => {
+    const requests: SpeechifyHttpRequest[] = [];
+    configureSpeechifyTransport(
+      async (request): Promise<SpeechifyHttpResponse> => {
+        requests.push(request);
+        return {
+          ok: false,
+          status: 401,
+          headers: { get: () => "application/json" },
+          json: async () => ({ error: { code: "unauthorized" } }),
+          arrayBuffer: async () => new ArrayBuffer(0),
+        };
+      },
+    );
+    await expect(
+      speechifySynthesize("Hello!", options, settings),
+    ).rejects.toThrow("401");
+    expect(requests).toHaveLength(1);
+    expect(speechifyRequestGate.used).toBe(6);
+  });
+
   it("sends a bearer token and receives MP3 bytes without sending a real request", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
