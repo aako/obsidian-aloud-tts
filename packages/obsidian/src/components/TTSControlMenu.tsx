@@ -61,7 +61,7 @@ export const TTSControlMenuContent = observer(
       <>
         {/* Grabber for mobile drawer UI */}
         <div className="menu-grabber" />
-        <div className="menu-scroll">
+        <div className="menu-scroll tts-aloud-controls">
           {bridge?.version && (
             <div className="tts-menu-row" aria-label="Aloud version">
               Aloud v{bridge.version}
