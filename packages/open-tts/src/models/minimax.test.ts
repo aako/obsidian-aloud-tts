@@ -50,6 +50,10 @@ describe("MiniMax Model", () => {
         apiKey: "test-api-key",
         model: "speech-2.6-turbo",
         voice: "English_expressive_narrator",
+        minimaxRouting: {
+          groupId: "g-123",
+          useChinaEndpoint: DEFAULT_SETTINGS.minimax_useChinaEndpoint,
+        },
       });
     });
   });

@@ -221,7 +221,19 @@ export function voiceHash(options: TTSModelOptions): string {
           render.similarity ?? null,
         ])}`
       : "";
-  return hashStrings([legacyIdentity + renderVariant])[0].toString();
+  // Old MiniMax keys cannot distinguish Group IDs or China/international
+  // routing. New MiniMax work gets a provider-specific versioned identity.
+  // No fallback to ambiguous old entries: it could play another account's
+  // audio. All other providers retain their *exact* previous disk keys.
+  const minimaxVariant = options.minimaxRouting
+    ? `|minimax-route-v1:${JSON.stringify([
+        options.minimaxRouting.groupId,
+        options.minimaxRouting.useChinaEndpoint,
+      ])}`
+    : "";
+  return hashStrings([
+    legacyIdentity + renderVariant + minimaxVariant,
+  ])[0].toString();
 }
 
 export const modelProviders = [
