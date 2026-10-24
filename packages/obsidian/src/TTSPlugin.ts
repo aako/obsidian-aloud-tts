@@ -25,7 +25,6 @@ import {
   configureSpeechifyTransport,
 } from "open-tts";
 import { AloudMediaSession } from "./MediaSessionController";
-import { REGISTRY } from "open-tts";
 import { TTSSettingTab } from "./components/TTSPluginSettingsTab";
 import { AudioSink } from "open-tts";
 import { WebAudioSink } from "open-tts/browser";
@@ -34,13 +33,12 @@ import { AudioSystem, createAudioSystem } from "open-tts";
 import { ChunkLoader } from "open-tts";
 import {
   MARKETING_NAME,
-  TTSPluginSettings,
   TTSPluginSettingsStore,
   pluginSettingsStore,
 } from "open-tts";
 import { ObsidianBridge, ObsidianBridgeImpl } from "./ObsidianBridge";
 import { configurableAudioCache } from "./ObsidianPlayer";
-import { AudioTextContext, TTSModel, TTSModelOptions } from "open-tts";
+import { ProxiedTTSModel } from "./ProxiedTTSModel";
 import { TTSEditorAction } from "./TTSEditorAction";
 import { DetachedPlayerHost } from "./components/DetachedPlayer";
 
@@ -542,27 +540,4 @@ export default class TTSPlugin extends Plugin {
     this.mediaSession = new AloudMediaSession(this.player, audio);
     this.mediaSession.start();
   }
-}
-
-function ProxiedTTSModel(settings: TTSPluginSettings): TTSModel {
-  const getModel = () => {
-    return REGISTRY[settings.modelProvider];
-  };
-  return {
-    call: (
-      text: string,
-      options: TTSModelOptions,
-      settings: TTSPluginSettings,
-      context?: AudioTextContext,
-      signal?: AbortSignal,
-    ) => {
-      return getModel().call(text, options, settings, context, signal);
-    },
-    validateConnection: (settings: TTSPluginSettings) => {
-      return getModel().validateConnection(settings);
-    },
-    convertToOptions: (settings: TTSPluginSettings) => {
-      return getModel().convertToOptions(settings);
-    },
-  };
 }
