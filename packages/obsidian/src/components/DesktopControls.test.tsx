@@ -55,6 +55,20 @@ describe("Desktop's shared Aloud controls", () => {
     expect(props.bridge.openArticleCache).toHaveBeenCalledWith("document");
   });
 
+  it("keeps each playback menu action in a shared, style-scoped list", () => {
+    const props = mockProps();
+    const { container } = render(<TTSControlMenuContent {...props} />);
+    const menu = container.querySelector(".menu-scroll.tts-aloud-controls");
+    expect(menu).toBeTruthy();
+    const groups = menu?.querySelectorAll(":scope > .menu-group");
+    expect(groups?.length).toBeGreaterThan(2);
+    const buttons = menu?.querySelectorAll(".menu-group > button.menu-item");
+    expect(buttons?.length).toBeGreaterThan(3);
+    fireEvent.click(screen.getByText("Manage Article Cache"));
+    expect(props.bridge.openArticleCache).toHaveBeenCalledWith("manage");
+    expect(props.onClose).toHaveBeenCalledOnce();
+  });
+
   it("keeps detached controls free of note-specific actions", () => {
     const props = mockProps();
     render(<TTSControlMenuContent {...props} showRestartFromCursor={false} />);
