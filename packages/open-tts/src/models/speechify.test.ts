@@ -74,7 +74,7 @@ describe("Speechify streaming", () => {
     ).toBe("mp3");
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(calls.map((request) => request.method)).toEqual(["GET", "POST"]);
-    expect(calls[0].url).toContain("locale=en-US");
+    expect(new URL(calls[0].url).searchParams.get("locale")).toBe("en");
     expect(calls[1].url).toBe("https://api.speechify.ai/v1/audio/speech");
     expect(calls[1].headers.Authorization).toBe("Bearer test-only-key");
     expect(JSON.parse(String(calls[1].body))).toEqual({
