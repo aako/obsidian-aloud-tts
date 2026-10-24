@@ -238,7 +238,12 @@ export class ChunkLoader {
       const errorInfo = ex instanceof TTSErrorInfo ? ex : undefined;
       const canRetry =
         !context.request?.signal?.aborted &&
-        !(ex && typeof ex === "object" && "name" in ex && ex.name === "AbortError") &&
+        !(
+          ex &&
+          typeof ex === "object" &&
+          "name" in ex &&
+          ex.name === "AbortError"
+        ) &&
         attempt < maxAttempts &&
         (errorInfo ? errorInfo.isRetryable : true);
       if (!canRetry) {
