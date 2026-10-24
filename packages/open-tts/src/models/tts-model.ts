@@ -1,5 +1,8 @@
 import { MARKETING_NAME_LONG } from "../marketing";
-import type { TTSPluginSettings } from "../player/TTSPluginSettings";
+import type {
+  ModelProvider,
+  TTSPluginSettings,
+} from "../player/TTSPluginSettings";
 
 // --- Audio data primitives ---
 export type MediaFormat = "mp3" | "wav" | "pcm";
@@ -59,6 +62,8 @@ export interface TTSModel {
  * Don't put random crap here, the different models can still read directly from the settings for obscure cases.
  */
 export interface TTSModelOptions {
+  /** Provider chosen when this audio request was queued. Not part of legacy disk cache identity. */
+  modelProvider?: ModelProvider;
   /** The model name to use */
   model: string;
   /** The voice to use. Often Depends on the model. */

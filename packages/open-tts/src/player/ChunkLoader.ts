@@ -140,16 +140,19 @@ export class ChunkLoader {
       requests = new Map();
       sharedRequests.set(this.system, requests);
     }
-    const key = hashAudioInputs(text, options, "mp3");
+    // Keep in-flight dedup provider-specific without invalidating stored audio.
+    const key = inFlightRequestKey(
+      text,
+      options,
+      this.system.settings.modelProvider,
+    );
     const existing = requests.get(key);
     if (existing) return existing;
     const pending = this.tryLoadTrack(
       text,
       options,
       0,
-      ["azure", "speechify"].includes(this.system.settings.modelProvider)
-        ? 0
-        : 3,
+      maxRetriesForRequest(options, this.system.settings.modelProvider),
       context,
     ).finally(() => requests!.delete(key));
     requests.set(key, pending);
@@ -322,6 +325,24 @@ interface BackgroundRequest {
   context: AudioTextContext;
   /** the position that was requested */
   position: number;
+}
+
+/** In-memory only. Provider identity must not change existing disk cache keys. */
+export function inFlightRequestKey(
+  text: string,
+  options: TTSModelOptions,
+  currentProvider: string,
+): string {
+  return `${options.modelProvider ?? currentProvider}|${hashAudioInputs(text, options, "mp3")}`;
+}
+
+/** Retry policy is bound to the queued request, not current UI settings. */
+export function maxRetriesForRequest(
+  options: TTSModelOptions,
+  currentProvider: string,
+): number {
+  const provider = options.modelProvider ?? currentProvider;
+  return provider === "azure" || provider === "speechify" ? 0 : 3;
 }
 
 interface CachedAudio {
