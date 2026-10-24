@@ -66,9 +66,14 @@ export class ChunkLoader {
     position: number,
     context: AudioTextContext = {},
   ): void {
-    // Check if already queued
+    const sourceAudioId = this.system.audioStore.activeText?.audio.id;
+    // Identical sentences in different reading sessions are different queued
+    // work, even if their voice and chunk index also happen to match.
     const found = this.backgroundQueue.find(
-      (x) => x.text === text && mobx.comparer.structural(x.options, options),
+      (x) =>
+        x.sourceAudioId === sourceAudioId &&
+        x.text === text &&
+        mobx.comparer.structural(x.options, options),
     );
     if (found) {
       return;
@@ -84,6 +89,7 @@ export class ChunkLoader {
     this.backgroundQueue.push({
       text,
       options,
+      sourceAudioId,
       requestedTime: Date.now(),
       context,
       position,
@@ -173,30 +179,42 @@ export class ChunkLoader {
     }
   }
 
-  // Processes the queue
+  // Processes the queue. Obsolete work must be discarded BEFORE cache lookup
+  // or a potentially paid synthesis request. Current foreground work is not
+  // affected; in-flight background work is handled separately.
   private processBackgroundQueue(): boolean {
     if (this.backgroundActiveCount >= this.MAX_BACKGROUND_REQUESTS) {
       return true;
     }
-    if (this.backgroundQueue.length === 0) {
-      return false;
+
+    while (this.backgroundQueue.length > 0) {
+      const item = this.backgroundQueue.shift()!;
+      const active = this.system.audioStore.activeText;
+      const currentOptions = this.system.ttsModel.convertToOptions(
+        this.system.settings,
+      );
+      if (
+        !isCurrentPreload(item, {
+          options: currentOptions,
+          text: active?.audio.chunks[item.position]?.text,
+          audioId: active?.audio.id,
+          position: active?.position,
+        })
+      ) {
+        continue;
+      }
+
+      this.backgroundActiveCount += 1;
+      this.load(item.text, item.options, backgroundPreloadContext(item.context))
+        .catch(() => undefined)
+        .finally(() => {
+          this.backgroundActiveCount -= 1;
+          this.processBackgroundQueue();
+        });
+      return true;
     }
 
-    const item = this.backgroundQueue.shift()!; // Take one item
-    const itemOptions: TTSModelOptions = item.options;
-
-    this.backgroundActiveCount += 1; // Increment active *requests* count by 1
-    this.load(item.text, itemOptions, {
-      ...item.context,
-      request: { priority: "background" },
-    })
-      .catch(() => undefined)
-      .finally(() => {
-        this.backgroundActiveCount -= 1;
-        this.processBackgroundQueue(); // Check for more work
-      });
-
-    return true; // Keep processor running if queue might still have items or requests are active
+    return false;
   }
 
   private processGarbage(): boolean {
@@ -307,6 +325,43 @@ class UnsavedAudioRequiresRecovery extends TTSErrorInfo {
   }
 }
 
+/**
+ * A background request belongs only to the still-active document, chunk and
+ * provider/voice configuration. Never synthesize obsolete queued work.
+ * Checks are made at dequeue time, not only when the work was scheduled.
+ */
+export function isCurrentPreload(
+  queued: Pick<
+    BackgroundRequest,
+    "text" | "position" | "options" | "sourceAudioId"
+  >,
+  current: {
+    text?: string;
+    audioId?: string;
+    position?: number;
+    options: TTSModelOptions;
+  },
+): boolean {
+  return (
+    current.position !== undefined &&
+    current.position >= 0 &&
+    queued.sourceAudioId === current.audioId &&
+    queued.position >= current.position &&
+    queued.text === current.text &&
+    mobx.comparer.structural(queued.options, current.options)
+  );
+}
+
+/** Preserve caller cancellation and accounting metadata on background work. */
+export function backgroundPreloadContext(
+  context: AudioTextContext,
+): AudioTextContext {
+  return {
+    ...context,
+    request: { ...context.request, priority: "background" },
+  };
+}
+
 // --- Helper Interfaces and Functions ---
 interface IntervalDaemon {
   stop: () => IntervalDaemon;
@@ -363,6 +418,8 @@ export function IntervalDaemon(
 }
 
 interface BackgroundRequest {
+  /** Unique reading session at the time of enqueue. */
+  sourceAudioId?: string;
   /** the text that was requested */
   text: string;
   /** the options used to generate this audio */
