@@ -29,6 +29,9 @@ export class ChunkLoader {
    * out of the one-minute in-memory cache. A healthy cache hit may clear it.
    */
   private unsavedSynthesisKeys = new Set<string>();
+  // A provider can have charged for WAV/PCM audio even if conversion fails.
+  // Never silently repeat that synthesis within the same plugin session.
+  private unplayableSynthesisKeys = new Set<string>();
   private backgroundRequestProcessor: IntervalDaemon;
   private garbageCollector: IntervalDaemon;
 
@@ -122,6 +125,7 @@ export class ChunkLoader {
     // Clear caches and queue on destroy
     this.localCache = [];
     this.unsavedSynthesisKeys.clear();
+    this.unplayableSynthesisKeys.clear();
     this.backgroundQueue = [];
     this.backgroundActiveCount = 0;
   }
@@ -279,10 +283,14 @@ export class ChunkLoader {
     const cached = await this.system.storage.getAudio(text, options, "mp3");
     if (cached) {
       this.unsavedSynthesisKeys.delete(requestKey);
+      this.unplayableSynthesisKeys.delete(requestKey);
       return cached;
     }
     if (this.unsavedSynthesisKeys.has(requestKey)) {
       throw new UnsavedAudioRequiresRecovery();
+    }
+    if (this.unplayableSynthesisKeys.has(requestKey)) {
+      throw new AudioConversionRequiresRecovery();
     }
 
     // A vault/iCloud cache read can complete well after the user changes the
@@ -310,7 +318,16 @@ export class ChunkLoader {
       context,
       context.request?.signal,
     );
-    const playable = await convertToPlayableFormat(audio);
+    // Conversion happens AFTER the provider has returned (potentially paid)
+    // audio. A conversion failure must not enter the synthesis retry loop.
+    let playable: AudioData;
+    try {
+      playable = await convertToPlayableFormat(audio);
+      this.unplayableSynthesisKeys.delete(requestKey);
+    } catch {
+      this.unplayableSynthesisKeys.add(requestKey);
+      throw new AudioConversionRequiresRecovery();
+    }
 
     // A storage failure is NOT a synthesis failure: retrying the whole
     // request would make another paid API call after audio was received.
@@ -341,6 +358,23 @@ class SupersededAudioRequest extends TTSErrorInfo {
   constructor() {
     super(
       "Audio voice or provider changed while reading the cache. The obsolete request was discarded before synthesis.",
+    );
+  }
+
+  override get isRetryable(): boolean {
+    return false;
+  }
+}
+
+/**
+ * The provider has already returned its audio, but that audio could not be
+ * converted to an MP3 usable by the player. This is a local post-synthesis
+ * failure, never a reason to make another billable request automatically.
+ */
+class AudioConversionRequiresRecovery extends TTSErrorInfo {
+  constructor() {
+    super(
+      "TTS audio was received, but local audio conversion failed. No automatic paid retry or regeneration of this chunk will occur during this session. Check provider audio format/settings before trying again.",
     );
   }
 
