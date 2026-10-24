@@ -36,6 +36,12 @@ This is the durable project handover, not a substitute for reading the current c
 
 Short Speechify chunks use the documented complete JSON MP3 endpoint rather than HTTP chunked transfer; long chunks retain stream mode. Native transport and decode failures provide error categories without revealing raw response content or keys. No implicit retry or cache migration. Verify on a real iPhone before calling the defect fixed.
 
+## Speechify English Voice Search (Candidate ios.12)
+
+- Requests the complete model-filtered English voice catalog (`locale=en`, explicit pages of up to 200). Includes en-US, en-GB and other English locales rather than discarding everything except exact en-US. US voices are sorted first.
+- A searchable name/ID/locale picker, visible loading/empty/error states, and explicit Refresh/Retry remain separate from manual Voice ID and paid synthesis.
+- Voice discovery does not call synthesis or reserve usage. Provider API responses are mocked in tests; real-account catalog results remain to be confirmed on Mac and iOS after installation.
+
 ## Prioritized Risk Register — Investigation Needed
 
 1. **Incomplete cache identity:** Audit every provider. ElevenLabs stability/similarity parameters and OpenAI-compatible response format are examples of audio-affecting options absent from the current common hash.
