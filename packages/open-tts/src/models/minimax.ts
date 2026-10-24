@@ -114,6 +114,12 @@ export const minimaxTextToSpeech: TTSModel = {
       apiKey: settings.minimax_apiKey,
       model: settings.minimax_ttsModel,
       voice: settings.minimax_ttsVoice,
+      // Capture billing/account routing along with model and voice. Old work
+      // must not silently adopt a new group or geographic endpoint.
+      minimaxRouting: {
+        groupId: settings.minimax_groupId,
+        useChinaEndpoint: settings.minimax_useChinaEndpoint,
+      },
     };
   },
 };
@@ -125,8 +131,13 @@ export async function minimaxCallTextToSpeech(
   _context: AudioTextContext = {},
   signal?: AbortSignal,
 ): Promise<AudioData> {
-  const groupId = settings.minimax_groupId;
-  const apiUrl = getMinimaxApiUrl(settings);
+  // Modern queued requests use their immutable routing snapshot. Direct
+  // library callers with older, untagged options preserve their old fallback.
+  const groupId = options.minimaxRouting?.groupId ?? settings.minimax_groupId;
+  const useChinaEndpoint =
+    options.minimaxRouting?.useChinaEndpoint ??
+    settings.minimax_useChinaEndpoint;
+  const apiUrl = useChinaEndpoint ? MINIMAX_CHINA_API_URL : MINIMAX_API_URL;
   const url = `${apiUrl}/v1/t2a_v2?GroupId=${encodeURIComponent(groupId)}`;
 
   const response = await fetch(url, {

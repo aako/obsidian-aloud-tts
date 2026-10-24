@@ -79,6 +79,15 @@ export interface TTSModelOptions {
     stability?: number;
     similarity?: number;
   }>;
+  /**
+   * MiniMax routing snapshot, captured when audio work is queued. Group IDs
+   * affect the account/voice namespace and must not be read from live settings
+   * later. This is hashed into new MiniMax cache keys, not exposed as a file name.
+   */
+  minimaxRouting?: Readonly<{
+    groupId: string;
+    useChinaEndpoint: boolean;
+  }>;
   /** The response format to request from the API. Only applicable to some models */
   responseFormat?: string;
   /** The generation speed to request from compatible TTS APIs. */
