@@ -29,6 +29,7 @@ function makeSystem() {
   };
   const ttsModel = {
     call: vi.fn().mockResolvedValue(received),
+    convertToOptions: vi.fn().mockReturnValue(options),
   };
   const system = {
     config: { backgroundLoaderIntervalMillis: 1000 },
