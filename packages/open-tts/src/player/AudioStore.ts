@@ -6,6 +6,7 @@ import {
   buildTrack,
 } from "./ActiveAudioText";
 import { AudioSystem } from "./AudioSystem";
+import { ChunkLoader } from "./ChunkLoader";
 import { AudioText, AudioTextOptions } from "./AudioTextChunk";
 import { splitTextForExport } from "../util/misc";
 import { concatenateMp3Buffers } from "../util/audioProcessing";
@@ -34,7 +35,7 @@ export interface AudioStore {
 
   closePlayer(): void;
 
-  /** exports an mp3 audio file. TODO make this better */
+  /** Export MP3 through the same cached, guarded synthesis path as playback. */
   exportAudio(text: string): Promise<ArrayBuffer>;
 
   /** Aborts the currently-running `exportAudio` at the next chunk boundary. */
@@ -82,6 +83,7 @@ class AudioStoreImpl implements AudioStore {
   autoScrollEnabled = true;
   exportProgress: ExportProgress | null = null;
   private exportAbortController: AbortController | null = null;
+  private exportLoader?: ChunkLoader;
   private lastProgrammaticScroll = 0;
   system: AudioSystem;
 
@@ -110,6 +112,12 @@ class AudioStoreImpl implements AudioStore {
   }
 
   async exportAudio(text: string): Promise<ArrayBuffer> {
+    if (this.exportAbortController) {
+      throw new Error("An audio export is already running.");
+    }
+    const loader = (this.exportLoader ??= new ChunkLoader({
+      system: this.system,
+    }));
     const options = this.system.ttsModel.convertToOptions(this.system.settings);
 
     // Get model's practical character limit (most models have 4000-4096 limit)
@@ -136,15 +144,14 @@ class AudioStoreImpl implements AudioStore {
       if (text.length <= maxChunkSize) {
         setProgress({ completed: 0, total: 1 });
         throwIfAborted();
-        const audio = await this.system.ttsModel.call(
-          text,
-          options,
-          this.system.settings,
-          undefined,
-          signal,
-        );
+        const audio = await loader.load(text, options, {
+          request: { priority: "foreground", signal },
+        });
+        // Obsidian's native transport cannot always cancel a dispatched
+        // request. Reject stale exports after the shared loader returns,
+        // but keep its successfully synthesized audio in the normal cache.
+        throwIfAborted();
         setProgress({ completed: 1, total: 1 });
-        // export remains mp3 for now; if not mp3, we could convert later
         return audio.data;
       }
 
@@ -157,13 +164,11 @@ class AudioStoreImpl implements AudioStore {
       // Generate audio for each chunk
       for (const chunk of renderable) {
         throwIfAborted();
-        const audio = await this.system.ttsModel.call(
-          chunk.text,
-          options,
-          this.system.settings,
-          chunk.context,
-          signal,
-        );
+        const audio = await loader.load(chunk.text, options, {
+          ...chunk.context,
+          request: { priority: "foreground", signal },
+        });
+        throwIfAborted();
         decodedAudios.push(audio.data);
         setProgress({
           completed: decodedAudios.length,
@@ -288,6 +293,8 @@ class AudioStoreImpl implements AudioStore {
   }
 
   destroy(): void {
+    this.exportAbortController?.abort();
+    this.exportLoader?.destroy();
     this.closePlayer();
     this.system.audioSink.pause();
     this._backgroundProcesses.forEach((p) => p.shutdown());
