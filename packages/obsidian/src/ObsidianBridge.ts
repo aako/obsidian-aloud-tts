@@ -22,6 +22,7 @@ import { readingFingerprint } from "./ReadingProgress";
 import type { ReadingProgress } from "./ReadingProgress";
 import type { ArticleCache, ArticleJob } from "./ArticleCache";
 import { ArticleCacheModal } from "./components/ArticleCacheModal";
+import { selectCurrentArticleCacheJob } from "./components/ArticleCacheSelection";
 
 export interface ObsidianBridgeSpecifics {
   activeObsidianEditor: Editor | undefined;
@@ -624,7 +625,14 @@ export class ObsidianBridgeImpl implements ObsidianBridge {
         };
       }
       if (scope !== "manage" && !opts) return;
-      const job = opts ? await this.articleCache.prepare(opts) : undefined;
+      const job = opts
+        ? await this.articleCache.prepare(opts)
+        : selectCurrentArticleCacheJob(
+            this.articleCache.jobs,
+            this.app.workspace.getActiveViewOfType(MarkdownView)?.file?.path ??
+              this.focusedEditorView?.file?.path ??
+              this.audio.activeText?.audio.sourcePath,
+          );
       new ArticleCacheModal(
         this.app,
         this.articleCache,
