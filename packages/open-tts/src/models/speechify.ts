@@ -117,9 +117,12 @@ export async function listSpeechifyVoices(
   if (!apiKey.trim()) throw new Error("Enter a Speechify API key.");
   const voices: SpeechifyVoice[] = [];
   const seen = new Set<string>();
+  const visitedCursors = new Set<string>();
   let cursor: string | undefined;
   for (let page = 0; page < 50; page++) {
-    const query = new URLSearchParams({ locale: "en-US", model });
+    // The API prefix filter includes en, en-US, en-GB and other English locales.
+    // Page explicitly so the complete catalog is searchable, even beyond 200.
+    const query = new URLSearchParams({ locale: "en", model, limit: "200" });
     if (cursor) query.set("cursor", cursor);
     const response = await speechifyHttpRequest({
       url: `${ENDPOINT}/voices?${query.toString()}`,
@@ -147,7 +150,7 @@ export async function listSpeechifyVoices(
         typeof voice.id === "string" &&
         voice.id &&
         typeof voice.locale === "string" &&
-        voice.locale.toLowerCase() === "en-us" &&
+        /^en(?:-|$)/i.test(voice.locale) &&
         !seen.has(voice.id)
       ) {
         seen.add(voice.id);
@@ -164,8 +167,9 @@ export async function listSpeechifyVoices(
       }
     }
     if (!value.has_more) return voices;
-    if (!value.next_cursor || value.next_cursor === cursor)
+    if (!value.next_cursor || visitedCursors.has(value.next_cursor))
       throw new Error("Speechify voice catalog pagination is incomplete.");
+    visitedCursors.add(value.next_cursor);
     cursor = value.next_cursor;
   }
   throw new Error("Speechify voice catalog exceeded pagination limit.");

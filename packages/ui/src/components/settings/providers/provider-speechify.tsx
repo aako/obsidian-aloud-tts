@@ -23,6 +23,7 @@ export const SpeechifySettings = observer(
     const [loading, setLoading] = React.useState(false);
     const [error, setError] = React.useState("");
     const [filter, setFilter] = React.useState("");
+    const [refresh, setRefresh] = React.useState(0);
 
     React.useEffect(() => {
       let cancelled = false;
@@ -49,16 +50,22 @@ export const SpeechifySettings = observer(
       return () => {
         cancelled = true;
       };
-    }, [apiKey, model]);
+    }, [apiKey, model, refresh]);
 
     const selected = store.settings.speechifyVoice;
     const filtered = voices
       .filter((voice) =>
-        `${voice.name} ${voice.id} ${voice.gender}`
+        `${voice.name} ${voice.id} ${voice.gender} ${voice.locale}`
           .toLowerCase()
-          .includes(filter.toLowerCase()),
+          .includes(filter.trim().toLowerCase()),
       )
-      .sort((a, b) => a.name.localeCompare(b.name));
+      // American voices first, but do not silently hide other English voices.
+      .sort(
+        (a, b) =>
+          Number(b.locale.toLowerCase() === "en-us") -
+            Number(a.locale.toLowerCase() === "en-us") ||
+          a.name.localeCompare(b.name),
+      );
 
     return (
       <>
@@ -80,7 +87,7 @@ export const SpeechifySettings = observer(
         />
         <TextInputSetting
           name="Voice ID"
-          description="Exact Speechify voice ID. You can also select an available US English voice below."
+          description="Exact Speechify voice ID. You can also select an available English voice below."
           store={store}
           provider="speechify"
           fieldName="speechifyVoice"
@@ -88,12 +95,30 @@ export const SpeechifySettings = observer(
         />
         <div className="setting-item">
           <div className="setting-item-info">
-            <div className="setting-item-name">US English voices</div>
+            <div className="setting-item-name">English voices</div>
             <div className="setting-item-description">
-              Catalog filtered by Speechify model and en-US locale; listing
-              voices does not synthesize audio.
-              {loading ? " Loading…" : ` ${voices.length} voices available.`}
-              {error && <span role="alert"> {error}</span>}
+              Search voices available for this model, with US voices listed
+              first. Voice discovery does not generate audio or consume TTS
+              characters.
+              {loading
+                ? " Loading catalog…"
+                : ` ${filtered.length} shown of ${voices.length} English voices.`}
+              {error && <span role="alert"> Catalog error: {error}</span>}
+              {!loading && !error && apiKey && voices.length === 0 && (
+                <span role="status">
+                  {" "}
+                  No English voices returned for this model. You can still enter
+                  a Voice ID manually.
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => setRefresh((value) => value + 1)}
+                disabled={!apiKey.trim() || loading}
+                aria-label="Refresh Speechify voice catalog"
+              >
+                {error ? "Retry" : "Refresh"}
+              </button>
             </div>
           </div>
           <div className="setting-item-control">
@@ -102,7 +127,8 @@ export const SpeechifySettings = observer(
               value={filter}
               aria-label="Search Speechify voices"
               onChange={(e) => setFilter(e.target.value)}
-              placeholder="Search voices…"
+              placeholder="Search name, ID, accent…"
+              disabled={!voices.length}
             />
             <select
               aria-label="Select Speechify voice"
@@ -114,10 +140,12 @@ export const SpeechifySettings = observer(
                   });
               }}
             >
-              <option value="">Select a listed voice</option>
+              <option value="">
+                {loading ? "Loading voices…" : "Select an English voice"}
+              </option>
               {filtered.map((v) => (
                 <option value={v.id} key={v.id}>
-                  {v.name} ({v.id}, {v.gender})
+                  {v.name} ({v.id}, {v.locale}, {v.gender})
                 </option>
               ))}
             </select>

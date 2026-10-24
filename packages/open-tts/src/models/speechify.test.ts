@@ -74,7 +74,7 @@ describe("Speechify streaming", () => {
     ).toBe("mp3");
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(calls.map((request) => request.method)).toEqual(["GET", "POST"]);
-    expect(calls[0].url).toContain("locale=en-US");
+    expect(new URL(calls[0].url).searchParams.get("locale")).toBe("en");
     expect(calls[1].url).toBe("https://api.speechify.ai/v1/audio/speech");
     expect(calls[1].headers.Authorization).toBe("Bearer test-only-key");
     expect(JSON.parse(String(calls[1].body))).toEqual({
@@ -216,7 +216,7 @@ describe("Speechify streaming", () => {
     expect(voiceHash(options)).not.toBe(voiceHash(changedModel));
   });
 
-  it("lists US voices using the documented envelope without billable synthesis", async () => {
+  it("lists English voices using the documented envelope without billable synthesis", async () => {
     const spy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -228,9 +228,9 @@ describe("Speechify streaming", () => {
             gender: "male",
           },
           {
-            id: "british",
-            display_name: "British",
-            locale: "en-GB",
+            id: "french",
+            display_name: "French",
+            locale: "fr-FR",
             gender: "male",
           },
         ],
@@ -240,7 +240,8 @@ describe("Speechify streaming", () => {
     expect(await listSpeechifyVoices("fake", "simba-3.2")).toEqual([
       { id: "geffen_32", name: "Geffen", locale: "en-US", gender: "male" },
     ]);
-    expect(String(spy.mock.calls[0][0])).toContain("locale=en-US");
+    expect(String(spy.mock.calls[0][0])).toContain("locale=en");
+    expect(String(spy.mock.calls[0][0])).toContain("limit=200");
     expect(String(spy.mock.calls[0][0])).toContain("model=simba-3.2");
   });
 });
