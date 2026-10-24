@@ -237,7 +237,15 @@ export class ChunkLoader {
       console.warn("error loading track", ex);
       const errorInfo = ex instanceof TTSErrorInfo ? ex : undefined;
       const canRetry =
-        attempt < maxAttempts && (errorInfo ? errorInfo.isRetryable : true);
+        !context.request?.signal?.aborted &&
+        !(
+          ex &&
+          typeof ex === "object" &&
+          "name" in ex &&
+          ex.name === "AbortError"
+        ) &&
+        attempt < maxAttempts &&
+        (errorInfo ? errorInfo.isRetryable : true);
       if (!canRetry) {
         throw ex;
       } else {
@@ -277,6 +285,23 @@ export class ChunkLoader {
       throw new UnsavedAudioRequiresRecovery();
     }
 
+    // A vault/iCloud cache read can complete well after the user changes the
+    // voice or provider. Recheck immediately BEFORE any billable synthesis.
+    // We only enforce this for provider-tagged options from the Obsidian proxy;
+    // older direct library consumers retain their existing behavior.
+    if (context.request?.signal?.aborted) {
+      throw new DOMException("Audio request cancelled.", "AbortError");
+    }
+    if (
+      options.modelProvider &&
+      !mobx.comparer.structural(
+        options,
+        this.system.ttsModel.convertToOptions(this.system.settings),
+      )
+    ) {
+      throw new SupersededAudioRequest();
+    }
+
     // Call provider and convert to playable format
     const audio = await this.system.ttsModel.call(
       text,
@@ -305,6 +330,22 @@ export class ChunkLoader {
       );
     }
     return playable;
+  }
+}
+
+/**
+ * A queued request became obsolete while waiting for the audio cache.
+ * This is not a provider error and is never safe to retry automatically.
+ */
+class SupersededAudioRequest extends TTSErrorInfo {
+  constructor() {
+    super(
+      "Audio voice or provider changed while reading the cache. The obsolete request was discarded before synthesis.",
+    );
+  }
+
+  override get isRetryable(): boolean {
+    return false;
   }
 }
 
