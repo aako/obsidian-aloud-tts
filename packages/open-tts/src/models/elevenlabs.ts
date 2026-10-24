@@ -24,6 +24,12 @@ export const elevenLabsTextToSpeech: TTSModel = {
       apiKey: settings.elevenlabs_apiKey,
       voice: settings.elevenlabs_voice,
       model: settings.elevenlabs_model,
+      // Capture rendering choices with the voice. Do not read mutable settings
+      // later when a background preload finally starts.
+      elevenLabsVoiceSettings: {
+        stability: settings.elevenlabs_stability,
+        similarity: settings.elevenlabs_similarity,
+      },
     };
   },
 };
@@ -80,9 +86,14 @@ export async function elevenLabsCallTextToSpeech(
     model_id: options.model,
   };
 
-  // Add voice settings if available in settings
-  const stability = settings.elevenlabs_stability;
-  const similarity = settings.elevenlabs_similarity;
+  // New queued requests carry an immutable rendering snapshot. Legacy
+  // direct callers without one retain their previous settings fallback.
+  const voiceSettings = options.elevenLabsVoiceSettings ?? {
+    stability: settings.elevenlabs_stability,
+    similarity: settings.elevenlabs_similarity,
+  };
+  const stability = voiceSettings.stability;
+  const similarity = voiceSettings.similarity;
   if (stability !== undefined || similarity !== undefined) {
     requestBody.voice_settings = {};
     if (stability !== undefined) {

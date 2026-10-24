@@ -203,15 +203,25 @@ export function isAudioExportDestination(
 }
 
 export function voiceHash(options: TTSModelOptions): string {
-  return hashStrings([
-    [
-      options.apiUri || "",
-      options.model || "",
-      options.voice || "",
-      options.instructions || "",
-      options.generationSpeed ?? 1,
-    ].join("|"),
-  ])[0].toString();
+  const legacyIdentity = [
+    options.apiUri || "",
+    options.model || "",
+    options.voice || "",
+    options.instructions || "",
+    options.generationSpeed ?? 1,
+  ].join("|");
+  // Preserve *exactly* the existing disk cache key at the default ElevenLabs
+  // settings. Customized rendering parameters require a distinct identity;
+  // older unversioned custom audio cannot be distinguished safely from default.
+  const render = options.elevenLabsVoiceSettings;
+  const renderVariant =
+    render && (render.stability !== 0.5 || render.similarity !== 0.75)
+      ? `|elevenlabs-render-v1:${JSON.stringify([
+          render.stability ?? null,
+          render.similarity ?? null,
+        ])}`
+      : "";
+  return hashStrings([legacyIdentity + renderVariant])[0].toString();
 }
 
 export const modelProviders = [

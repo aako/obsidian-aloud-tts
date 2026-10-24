@@ -74,6 +74,11 @@ export interface TTSModelOptions {
   apiUri?: string;
   /** The API key to use. Not required for all models. */
   apiKey?: string;
+  /** Snapshot of ElevenLabs rendering parameters captured when work is queued. */
+  elevenLabsVoiceSettings?: Readonly<{
+    stability?: number;
+    similarity?: number;
+  }>;
   /** The response format to request from the API. Only applicable to some models */
   responseFormat?: string;
   /** The generation speed to request from compatible TTS APIs. */

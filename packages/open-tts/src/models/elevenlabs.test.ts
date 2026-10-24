@@ -38,6 +38,10 @@ describe("ElevenLabs Model", () => {
           apiKey: "test-api-key",
           voice: "test-voice-id",
           model: "eleven_multilingual_v2",
+          elevenLabsVoiceSettings: {
+            stability: 0.5,
+            similarity: 0.75,
+          },
         });
       });
     });
