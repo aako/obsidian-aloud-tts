@@ -51,11 +51,17 @@ const providerSettingsViews: Record<
 export const TTSSettingsTabComponent: React.FC<{
   store: TTSPluginSettingsStore;
   player: AudioStore;
-}> = observer(({ store, player }) => {
+  version?: string;
+}> = observer(({ store, player, version }) => {
   const [isActive, setActive] = React.useState(false);
   const ProviderSettings = providerSettingsViews[store.settings.modelProvider];
   return (
     <>
+      {version && (
+        <p className="setting-item-description" aria-label="Aloud version">
+          Aloud v{version}
+        </p>
+      )}
       <ErrorInfoView player={player} />
       <SettingSection>
         <TestVoiceComponent

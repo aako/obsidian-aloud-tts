@@ -535,6 +535,7 @@ export default class TTSPlugin extends Plugin {
       this.settings,
       this.progress,
       this.articleCache,
+      this.manifest.version,
     );
     this.progress.start();
     this.mediaSession = new AloudMediaSession(this.player, audio);
