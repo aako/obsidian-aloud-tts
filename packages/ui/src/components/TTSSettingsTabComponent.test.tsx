@@ -40,10 +40,14 @@ describe("TTSPluginSettingsTab", () => {
       <TTSSettingsTabComponent
         store={stores.settingsStore}
         player={stores.audioStore}
+        version="0.15.1-ios.19"
       />,
     );
 
     expect(screen.getByText("Model Provider")).toBeDefined();
+    expect(screen.getByLabelText("Aloud version").textContent).toContain(
+      "0.15.1-ios.19",
+    );
     expect(screen.getByRole("button", { name: /play/i })).toBeDefined();
 
     // Switch through all providers to maximize coverage

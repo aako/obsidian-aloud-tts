@@ -19,6 +19,7 @@ export class ArticleCacheModal extends Modal {
     private settings: TTSPluginSettingsStore,
     private selected?: ArticleJob,
     private onListen?: (job: ArticleJob) => Promise<void>,
+    private version?: string,
   ) {
     super(app);
   }
@@ -31,6 +32,7 @@ export class ArticleCacheModal extends Modal {
         settings={this.settings}
         initial={this.selected}
         onListen={this.onListen}
+        version={this.version}
       />,
     );
   }
@@ -45,11 +47,13 @@ export const ArticleCacheView = observer(
     settings,
     initial,
     onListen,
+    version,
   }: {
     manager: ArticleCache;
     settings: TTSPluginSettingsStore;
     initial?: ArticleJob;
     onListen?: (job: ArticleJob) => Promise<void>;
+    version?: string;
   }): React.ReactElement => {
     const [id, setId] = React.useState(
       initial?.id ?? manager.jobs[0]?.id ?? "",
@@ -112,10 +116,16 @@ export const ArticleCacheView = observer(
     }, [id]);
     return (
       <div className="tts-cache-panel">
+        {version && (
+          <p className="setting-item-description" aria-label="Aloud version">
+            Aloud v{version}
+          </p>
+        )}
         <p>
-          Audio stays in the vault until you delete it. The size limit stops new
-          caching without evicting old audio. Let iCloud download the entire
-          folder before offline playback.
+          Listening caches audio locally first; the separate vault save can
+          finish later or fail. Only verified persistent vault audio is
+          iCloud-syncable. Render All creates and verifies missing vault copies.
+          Let iCloud download the folder before offline playback.
         </p>
         <label>
           Article{" "}
@@ -131,23 +141,32 @@ export const ArticleCacheView = observer(
         {job && (
           <>
             <p role="status">
+              Bulk render job:{" "}
               {job.chunks.filter((chunk) => chunk.state === "cached").length}/
-              {job.chunks.length} chunks · {job.state}. {job.message}
+              {job.chunks.length} chunks processed · {job.state}. {job.message}
             </p>
             <button disabled={checking} onClick={() => run(refresh)}>
-              Verify / Estimate
+              Verify local + vault cache (no synthesis)
             </button>
             {estimate && (
-              <p>
-                {estimate.characters.toLocaleString()} characters ·{" "}
-                {estimate.cached} cached · {estimate.missing} missing ·
-                approximately {estimate.requests} new {serviceName} requests
-                before retries ·{" "}
-                {estimate.additionalCharacters.toLocaleString()} additional
-                characters · about{" "}
-                {(estimate.approximateBytes / 1048576).toFixed(1)} MB. Audio
-                size is a rough 96 kbps speech estimate; voice and format vary.
-              </p>
+              <>
+                <p role="status">
+                  Available on this device: {estimate.cached} chunks; verified
+                  in persistent vault: {estimate.persistentCached}; local-only:
+                  {estimate.localOnlyCached}; vault unavailable or pending
+                  iCloud:
+                  {estimate.persistentUnavailable}.
+                </p>
+                <p>
+                  {estimate.characters.toLocaleString()} characters ·{" "}
+                  {estimate.missing} missing · approximately {estimate.requests}{" "}
+                  new {serviceName} requests before retries ·{" "}
+                  {estimate.additionalCharacters.toLocaleString()} additional
+                  characters · about{" "}
+                  {(estimate.approximateBytes / 1048576).toFixed(1)} MB. Audio
+                  size is a rough 96 kbps speech estimate.
+                </p>
+              </>
             )}
             <p>
               Locally tracked this UTC month:{" "}
@@ -206,7 +225,9 @@ export const ArticleCacheView = observer(
                 }
                 onClick={() => run(() => manager.start(job, consent))}
               >
-                {job.state === "failed" ? "Retry Failed" : "Start / Resume"}
+                {job.state === "failed"
+                  ? "Retry Failed Render"
+                  : "Render All Missing Audio (save to vault)"}
               </button>
               <button onClick={() => run(() => manager.pause(job))}>
                 Pause
@@ -239,7 +260,10 @@ export const ArticleCacheView = observer(
             </button>
           </>
         )}
-        <p>Persistent folder usage: {(bytes / 1048576).toFixed(1)} MB.</p>
+        <p>
+          Persistent vault folder usage on this device:{" "}
+          {(bytes / 1048576).toFixed(1)} MB (not the local playback cache).
+        </p>
         <label>
           Cache Folder{" "}
           <input

@@ -43,7 +43,14 @@ export interface ArticleJob {
 
 export interface CacheEstimate {
   characters: number;
+  /** Playable on this device, including device-local cache. */
   cached: number;
+  /** Audio independently verified in the persistent vault cache. */
+  persistentCached: number;
+  /** Playable locally but not found in persistent vault metadata. */
+  localOnlyCached: number;
+  /** Persistent metadata existed but its audio could not be verified. */
+  persistentUnavailable: number;
   missing: number;
   requests: number;
   additionalCharacters: number;
@@ -262,6 +269,8 @@ export class ArticleCache {
     const chunks = buildTrack(opts, job.chunkType).chunks;
     const options = this.system.ttsModel.convertToOptions(this.system.settings);
     let cached = 0,
+      persistentCached = 0,
+      persistentUnavailable = 0,
       characters = 0,
       additionalCharacters = 0,
       bytes = 0;
@@ -282,6 +291,17 @@ export class ArticleCache {
       if (audio) {
         cached++;
         bytes += audio.data.byteLength;
+        // The normal playback lookup can hit IndexedDB or legacy .tts.
+        // Verify persistent iCloud-capable storage separately, without TTS.
+        try {
+          if (await this.vault.getAudio(chunk.text, options, "mp3")) {
+            persistentCached++;
+          }
+        } catch {
+          // Preserve a useful, non-destructive count when the audio exists
+          // locally but persistent metadata awaits an iCloud download.
+          persistentUnavailable++;
+        }
       } else if (!missingKeys.has(job.chunks[index].key)) {
         additionalCharacters += count;
         missingKeys.add(job.chunks[index].key);
@@ -304,6 +324,9 @@ export class ArticleCache {
     return {
       characters,
       cached,
+      persistentCached,
+      localOnlyCached: cached - persistentCached - persistentUnavailable,
+      persistentUnavailable,
       missing: chunks.length - cached,
       requests: azure || google || speechify ? missingKeys.size : 0,
       additionalCharacters,

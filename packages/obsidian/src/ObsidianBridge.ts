@@ -31,6 +31,8 @@ export interface ObsidianBridge
   extends TTSEditorBridge,
     ObsidianBridgeSpecifics {
   canPlayDetachedAudio: boolean;
+  /** Installed plugin manifest version, identical on all plugin interfaces. */
+  readonly version?: string;
   // Obsidian-specific methods beyond the shared interface
   triggerSelection: (
     file: TFile | null,
@@ -123,6 +125,7 @@ export class ObsidianBridgeImpl implements ObsidianBridge {
     private settings: TTSPluginSettingsStore,
     private progress?: ReadingProgress,
     private articleCache?: ArticleCache,
+    readonly version?: string,
   ) {
     mobx.makeObservable(this, {
       active: mobx.observable.ref,
@@ -634,6 +637,7 @@ export class ObsidianBridgeImpl implements ObsidianBridge {
             await this.articleCache.playbackOptions(selected),
           );
         },
+        this.version,
       ).open();
     } catch (error) {
       new Notice(

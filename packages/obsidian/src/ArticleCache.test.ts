@@ -86,6 +86,8 @@ describe("article pre-caching", () => {
     const estimate = await manager.estimate(job);
     expect(estimate.missing).toBeGreaterThan(0);
     expect(estimate.characters).toBeGreaterThan(0);
+    expect(estimate.persistentCached).toBe(0);
+    expect(estimate.localOnlyCached).toBe(0);
     expect(call).not.toHaveBeenCalled();
     expect(job.state).toBe("paused");
   });
@@ -103,6 +105,12 @@ describe("article pre-caching", () => {
     await manager.start(job);
     expect(job.state).toBe("complete");
     expect(cached.size).toBeGreaterThan(0);
+    // The fixture deliberately simulates local playback storage while its
+    // persistent vault save is a no-op. Do not report these as iCloud-saved.
+    const verified = await manager.estimate(job);
+    expect(verified.cached).toBeGreaterThan(0);
+    expect(verified.persistentCached).toBe(0);
+    expect(verified.localOnlyCached).toBe(verified.cached);
     const calls = call.mock.calls.length;
     await manager.start(job);
     expect(call).toHaveBeenCalledTimes(calls);

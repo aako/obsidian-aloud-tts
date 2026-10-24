@@ -12,6 +12,7 @@ export class TTSSettingTab extends PluginSettingTab {
   miniPlayer: AudioStore;
   wasPlaying: boolean = false;
   containerRoot: Root | null = null;
+  private readonly installedVersion: string;
 
   constructor(
     app: App,
@@ -20,6 +21,7 @@ export class TTSSettingTab extends PluginSettingTab {
     player: AudioStore,
   ) {
     super(app, plugin);
+    this.installedVersion = plugin.manifest.version;
     this.settings = settings;
     this.mainPlayer = player;
   }
@@ -34,6 +36,7 @@ export class TTSSettingTab extends PluginSettingTab {
         <TTSSettingsTabComponent
           store={this.settings}
           player={this.mainPlayer}
+          version={this.installedVersion}
         />
       </ObsidianTooltipProvider>,
     );
