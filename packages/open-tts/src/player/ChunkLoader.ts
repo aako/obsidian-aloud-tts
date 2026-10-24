@@ -23,6 +23,12 @@ export class ChunkLoader {
   private backgroundQueue: BackgroundRequest[] = [];
   private backgroundActiveCount = 0;
   private localCache: CachedAudio[] = [];
+  /**
+   * Session-only safety barrier: after successfully synthesizing a chunk whose
+   * cache write failed, don't silently buy the same audio again if it falls
+   * out of the one-minute in-memory cache. A healthy cache hit may clear it.
+   */
+  private unsavedSynthesisKeys = new Set<string>();
   private backgroundRequestProcessor: IntervalDaemon;
   private garbageCollector: IntervalDaemon;
 
@@ -109,6 +115,7 @@ export class ChunkLoader {
     this.garbageCollector.stop();
     // Clear caches and queue on destroy
     this.localCache = [];
+    this.unsavedSynthesisKeys.clear();
     this.backgroundQueue = [];
     this.backgroundActiveCount = 0;
   }
@@ -236,10 +243,20 @@ export class ChunkLoader {
     options: TTSModelOptions,
     context: AudioTextContext = {},
   ): Promise<AudioData> {
-    // Check cache for mp3 (the playable format we store)
+    const requestKey = inFlightRequestKey(
+      text,
+      options,
+      this.system.settings.modelProvider,
+    );
+    // Preserve existing safety behavior: unreadable known caches must throw
+    // rather than causing a new billable generation.
     const cached = await this.system.storage.getAudio(text, options, "mp3");
     if (cached) {
+      this.unsavedSynthesisKeys.delete(requestKey);
       return cached;
+    }
+    if (this.unsavedSynthesisKeys.has(requestKey)) {
+      throw new UnsavedAudioRequiresRecovery();
     }
 
     // Call provider and convert to playable format
@@ -252,10 +269,41 @@ export class ChunkLoader {
     );
     const playable = await convertToPlayableFormat(audio);
 
-    // Cache the mp3
-    await this.system.storage.saveAudio(text, options, playable);
-
+    // A storage failure is NOT a synthesis failure: retrying the whole
+    // request would make another paid API call after audio was received.
+    try {
+      await this.system.storage.saveAudio(text, options, playable);
+      this.unsavedSynthesisKeys.delete(requestKey);
+    } catch (error) {
+      this.unsavedSynthesisKeys.add(requestKey);
+      // Do not log raw storage errors: they may contain private vault paths.
+      const category =
+        error instanceof Error && /^[a-z][a-z0-9]{0,39}$/i.test(error.name)
+          ? error.name
+          : "UnknownError";
+      console.warn(
+        "Aloud: synthesis succeeded but the audio cache write failed. Playing the received audio from memory; it is NOT saved. Further synthesis of this chunk is blocked for this session if the in-memory copy expires.",
+        category,
+      );
+    }
     return playable;
+  }
+}
+
+/**
+ * A previously synthesized result was returned to the player but could not
+ * be stored. Do not regenerate it automatically merely because memory expired.
+ * TTSErrorInfo preserves a readable message in the existing player UI.
+ */
+class UnsavedAudioRequiresRecovery extends TTSErrorInfo {
+  constructor() {
+    super(
+      "This audio was already synthesized but its cache write failed. To avoid another paid request, automatic regeneration is blocked for this session. Check local cache storage before restarting Aloud.",
+    );
+  }
+
+  override get isRetryable(): boolean {
+    return false;
   }
 }
 
