@@ -22,6 +22,10 @@ export function configurableAudioCache(
   // the article pre-cache worker can still explicitly await its own verified write.
   let sharedSaveTail: Promise<void> = Promise.resolve();
   const pendingSharedKeys = new Set<string>();
+  // Retry only vault writes that failed for audio synthesized in this session.
+  // Never silently promote unrelated old .tts/IndexedDB entries whose provider
+  // provenance cannot be established from the legacy cache key.
+  const failedSharedKeys = new Set<string>();
   const reportedErrors = new Set<string>();
 
   function enqueueSharedSave(
@@ -36,7 +40,11 @@ export function configurableAudioCache(
     pendingSharedKeys.add(key);
     const queued = sharedSaveTail
       .then(() => sharedCache.saveAudio(text, options, audio))
+      .then(() => {
+        failedSharedKeys.delete(key);
+      })
       .catch((error: unknown) => {
+        failedSharedKeys.add(key);
         const reason = error instanceof Error ? error.message : String(error);
         if (!reportedErrors.has(reason)) {
           reportedErrors.add(reason);
@@ -48,6 +56,23 @@ export function configurableAudioCache(
       })
       .finally(() => pendingSharedKeys.delete(key));
     sharedSaveTail = queued.then(() => undefined);
+  }
+
+  function retryFailedSharedSave(
+    text: string,
+    options: TTSModelOptions,
+    audio: AudioData,
+    persistentError: unknown,
+  ): void {
+    if (
+      audio.format === "mp3" &&
+      !persistentError &&
+      failedSharedKeys.has(hashAudioInputs(text, options, audio.format))
+    ) {
+      // Only reuse the bytes we already have locally. No provider API calls.
+      // Never overwrite/reference an iCloud copy whose metadata is unavailable.
+      enqueueSharedSave(text, options, audio);
+    }
   }
 
   const cancelReaction = mobx.reaction(
@@ -66,7 +91,10 @@ export function configurableAudioCache(
       let persistentError: unknown;
       try {
         const saved = await persistent?.getAudio(text, settings, format);
-        if (saved) return saved;
+        if (saved) {
+          failedSharedKeys.delete(hashAudioInputs(text, settings, format));
+          return saved;
+        }
       } catch (error) {
         persistentError = error;
       }
@@ -76,9 +104,15 @@ export function configurableAudioCache(
         settings,
         format,
       );
-      if (legacy) return legacy;
+      if (legacy) {
+        retryFailedSharedSave(text, settings, legacy, persistentError);
+        return legacy;
+      }
       const local = await active.getAudio(text, settings, format);
-      if (local) return local;
+      if (local) {
+        retryFailedSharedSave(text, settings, local, persistentError);
+        return local;
+      }
       // Do not call Azure to recreate an expected-but-missing iCloud file.
       if (persistentError) throw persistentError;
       return null;
