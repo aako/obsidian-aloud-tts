@@ -1,4 +1,5 @@
 import * as mobx from "mobx";
+import { relocatedVaultPath } from "./util/VaultPathRelocation";
 import { zippedMP3Chunks } from "./CachedAudioZip";
 import {
   AudioSystem,
@@ -217,6 +218,31 @@ export class ArticleCache {
     return `${this.system.settings.modelProvider}:${voiceHash(this.system.ttsModel.convertToOptions(this.system.settings))}`;
   }
 
+  /**
+   * Article job IDs are historical metadata filenames and must stay stable.
+   * Move only the source path. In-progress rendering is paused rather than
+   * generating additional audio against an article mid-rename.
+   */
+  async relocatePaths(oldPath: string, newPath: string): Promise<void> {
+    if (!oldPath || !newPath || oldPath === newPath) return;
+    const affected = this.jobs.filter(
+      (job) => relocatedVaultPath(job.path, oldPath, newPath) !== job.path,
+    );
+    if (!affected.length) return;
+    if (this.busy) this.requestController?.abort();
+    mobx.runInAction(() => {
+      for (const job of affected) {
+        job.path = relocatedVaultPath(job.path, oldPath, newPath);
+        if (job.state === "running" || job.state === "waiting") {
+          job.state = "paused";
+          job.message =
+            "Article moved during rendering. Verify before resuming.";
+        }
+      }
+    });
+    for (const job of affected) await this.save(job);
+  }
+
   async prepare(opts: AudioTextOptions): Promise<ArticleJob> {
     if (!opts.sourcePath)
       throw new Error("Save the note before pre-caching it.");
@@ -235,7 +261,16 @@ export class ArticleCache {
       { model: "article-job-v1" },
       "mp3",
     );
-    const existing = this.jobs.find((job) => job.id === id);
+    const existing = this.jobs.find(
+      (job) =>
+        job.id === id ||
+        (job.path === opts.sourcePath &&
+          job.start === opts.start &&
+          job.end === opts.end &&
+          job.fingerprint === fingerprint &&
+          job.voice === voice &&
+          job.chunkType === this.system.settings.chunkType),
+    );
     if (existing) return existing;
     const options = this.system.ttsModel.convertToOptions(this.system.settings);
     const chunks = buildTrack(opts, this.system.settings.chunkType).chunks.map(

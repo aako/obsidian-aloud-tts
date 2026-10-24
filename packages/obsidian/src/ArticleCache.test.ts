@@ -92,6 +92,34 @@ describe("article pre-caching", () => {
     expect(job.state).toBe("paused");
   });
 
+  it("tracks an article move without duplicating a job or buying audio", async () => {
+    const { manager, call } = fixture();
+    managers.push(manager);
+    const oldPath = "Reading/Essay.md";
+    const newPath = "Archive/Essay.md";
+    const job = await manager.prepare({
+      text,
+      filename: oldPath,
+      sourcePath: oldPath,
+      start: 0,
+      end: text.length,
+    });
+    const originalId = job.id;
+    await manager.relocatePaths(oldPath, newPath);
+    expect(job.path).toBe(newPath);
+    expect(job.id).toBe(originalId);
+    const same = await manager.prepare({
+      text,
+      filename: newPath,
+      sourcePath: newPath,
+      start: 0,
+      end: text.length,
+    });
+    expect(same).toBe(job);
+    expect(manager.jobs).toHaveLength(1);
+    expect(call).not.toHaveBeenCalled();
+  });
+
   it("reuses synthesized chunks and restores a paused job from metadata", async () => {
     const { manager, call, adapter, cached } = fixture();
     managers.push(manager);

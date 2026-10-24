@@ -97,6 +97,71 @@ describe("durable progress", () => {
       }),
     ).toBe(true);
   });
+  it("preserves a saved bookmark after a note move and reload", async () => {
+    const storage = new Map<string, string>();
+    const adapter = {
+      read: vi.fn(async (path: string) => {
+        const result = storage.get(path);
+        if (result === undefined) throw new Error("not found");
+        return result;
+      }),
+      exists: vi.fn(async (path: string) => storage.has(path)),
+      write: vi.fn(async (path: string, data: string) => {
+        storage.set(path, data);
+      }),
+    } as unknown as DataAdapter;
+    const app = { vault: { configDir: ".obsidian" } } as unknown as App;
+    const player = mobx.observable({
+      activeText: null as unknown,
+    }) as unknown as AudioStore;
+    const settings = {
+      settings: { chunkType: "sentence" },
+    } as unknown as TTSPluginSettingsStore;
+    const saved = record(1, readingFingerprint("Second sentence. "));
+    const key = readingKey(
+      saved.path,
+      saved.start,
+      saved.end,
+      saved.fingerprint,
+    );
+    const initial = {
+      version: 1,
+      generation: 1,
+      latestKey: key,
+      readings: { [key]: saved },
+    };
+    storage.set(
+      ".obsidian/plugins/aloud-ios-fork/reading-progress.a.json",
+      JSON.stringify(initial),
+    );
+    const progress = new ReadingProgress(
+      app,
+      adapter,
+      player,
+      settings,
+      "aloud-ios-fork",
+    );
+    await progress.load();
+    await progress.relocatePaths("articles", "Archive/articles");
+    const moved = {
+      ...opts,
+      sourcePath: "Archive/articles/article.md",
+      filename: "Archive/articles/article.md",
+    };
+    expect(progress.positionFor(moved)).toBe(1);
+    expect(progress.latest?.path).toBe(moved.sourcePath);
+    const restored = new ReadingProgress(
+      app,
+      adapter,
+      player,
+      settings,
+      "aloud-ios-fork",
+    );
+    await restored.load();
+    expect(restored.positionFor(moved)).toBe(1);
+    expect(restored.positionFor(opts)).toBeUndefined();
+  });
+
   it("writes redundant checkpoints and restores across plugin instances", async () => {
     const storage = new Map<string, string>();
     const adapter = {
