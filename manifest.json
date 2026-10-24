@@ -1,7 +1,7 @@
 {
   "id": "aloud-ios-fork",
   "name": "Aloud (iOS Fork)",
-  "version": "0.15.1-ios.14",
+  "version": "0.15.1-ios.15",
   "minAppVersion": "0.15.0",
   "description": "Independent Aloud iOS fork with conservative, durable reading bookmarks and playback fixes.",
   "author": "Adrian Lyjak",
