@@ -565,7 +565,8 @@ details[open] .tts-error-details {
   display: none;
 }
 
-/* Persistent Article Audio Cache management modal. */
+/* Persistent Article Audio Cache management modal. Compact, not full-width
+   action buttons; wrap labels naturally on narrow iPhone screens. */
 .tts-cache-panel label {
   display: block;
   margin: 12px 0;
@@ -574,11 +575,28 @@ details[open] .tts-error-details {
 .tts-cache-panel input:not([type="checkbox"]) {
   max-width: 100%;
 }
+.tts-cache-panel button {
+  box-sizing: border-box;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  min-height: 34px;
+  padding: 6px 11px;
+  white-space: normal;
+  line-height: 1.3;
+}
 .tts-cache-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin: 12px 0;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 10px 0;
+}
+.tts-cache-actions button {
+  flex: 0 1 auto;
+}
+.tts-cache-actions .tts-cache-render {
+  font-weight: var(--font-semibold);
 }
 
 /* Azure voice search, filters, favorites, and scrolling results. */

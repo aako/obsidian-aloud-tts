@@ -55,9 +55,9 @@ export const ArticleCacheView = observer(
     onListen?: (job: ArticleJob) => Promise<void>;
     version?: string;
   }): React.ReactElement => {
-    const [id, setId] = React.useState(
-      initial?.id ?? manager.jobs[0]?.id ?? "",
-    );
+    // Manage has no implicit job. A prior unrelated article must never be
+    // selected silently, especially when destructive actions are available.
+    const [id, setId] = React.useState(initial?.id ?? "");
     const job = manager.jobs.find((item) => item.id === id);
     const [estimate, setEstimate] = React.useState<CacheEstimate>();
     const [consent, setConsent] = React.useState(false);
@@ -91,6 +91,12 @@ export const ArticleCacheView = observer(
       settings.settings.persistentCacheMaxMB,
     );
     const [checking, setChecking] = React.useState(false);
+    const refreshGeneration = React.useRef(0);
+    const isRendering = job?.state === "running" || job?.state === "waiting";
+    const fullyVerified =
+      !!job &&
+      job.chunks.length > 0 &&
+      estimate?.persistentCached === job.chunks.length;
     const run = (operation: () => Promise<unknown>): void => {
       setError("");
       void operation().catch((reason: unknown) =>
@@ -100,19 +106,28 @@ export const ArticleCacheView = observer(
       );
     };
     const refresh = async (): Promise<void> => {
+      const generation = ++refreshGeneration.current;
       setChecking(true);
       setEstimate(undefined);
       setConsent(false);
       try {
-        if (job) setEstimate(await manager.estimate(job));
-        setBytes(await manager.vault.getStorageSize());
+        // An earlier article's async verification must not populate a newer
+        // selection after a slow iCloud read finishes.
+        const nextEstimate = job ? await manager.estimate(job) : undefined;
+        const nextBytes = await manager.vault.getStorageSize();
+        if (generation !== refreshGeneration.current) return;
+        setEstimate(nextEstimate);
+        setBytes(nextBytes);
       } finally {
-        setChecking(false);
+        if (generation === refreshGeneration.current) setChecking(false);
       }
     };
     React.useEffect(() => {
       setConfirmDelete(false);
       run(refresh);
+      return () => {
+        refreshGeneration.current += 1;
+      };
     }, [id]);
     return (
       <div className="tts-cache-panel">
@@ -138,12 +153,21 @@ export const ArticleCacheView = observer(
             ))}
           </select>
         </label>
+        {!job && (
+          <p role="status">
+            Select an article to inspect its cached audio. Nothing is selected
+            for rendering or deletion.
+          </p>
+        )}
         {job && (
           <>
             <p role="status">
-              Bulk render job:{" "}
-              {job.chunks.filter((chunk) => chunk.state === "cached").length}/
-              {job.chunks.length} chunks processed · {job.state}. {job.message}
+              {isRendering
+                ? `Rendering: ${
+                    job.chunks.filter((chunk) => chunk.state === "cached")
+                      .length
+                  }/${job.chunks.length} job chunks. ${job.message}`
+                : `Render job: ${job.state}. ${job.message}`}
             </p>
             <button disabled={checking} onClick={() => run(refresh)}>
               Verify local + vault cache (no synthesis)
@@ -151,12 +175,15 @@ export const ArticleCacheView = observer(
             {estimate && (
               <>
                 <p role="status">
-                  Available on this device: {estimate.cached} chunks; verified
-                  in persistent vault: {estimate.persistentCached}; local-only:
+                  Verified persistent vault: {estimate.persistentCached}/
+                  {job.chunks.length} chunks. Available on this device:{" "}
+                  {estimate.cached}/{job.chunks.length}. Local-only:{" "}
                   {estimate.localOnlyCached}; vault unavailable or pending
-                  iCloud:
-                  {estimate.persistentUnavailable}.
+                  iCloud: {estimate.persistentUnavailable}.
                 </p>
+                {fullyVerified && (
+                  <p>All article chunks are verified. No rendering needed.</p>
+                )}
                 <p>
                   {estimate.characters.toLocaleString()} characters ·{" "}
                   {estimate.missing} missing · approximately {estimate.requests}{" "}
@@ -217,24 +244,32 @@ export const ArticleCacheView = observer(
                 </button>
               )}
               <button
+                className="tts-cache-render"
                 disabled={
                   !estimate ||
                   checking ||
+                  fullyVerified ||
                   (estimate.exceedsBudget && !consent) ||
-                  ["running", "waiting"].includes(job.state)
+                  isRendering
                 }
                 onClick={() => run(() => manager.start(job, consent))}
               >
-                {job.state === "failed"
-                  ? "Retry Failed Render"
-                  : "Render All Missing Audio (save to vault)"}
+                {fullyVerified
+                  ? "All Audio Verified"
+                  : job.state === "failed"
+                    ? "Retry Failed Render"
+                    : "Render All Missing Audio"}
               </button>
-              <button onClick={() => run(() => manager.pause(job))}>
-                Pause
-              </button>
-              <button onClick={() => run(() => manager.pause(job, true))}>
-                Cancel Job
-              </button>
+              {isRendering && (
+                <>
+                  <button onClick={() => run(() => manager.pause(job))}>
+                    Pause Render
+                  </button>
+                  <button onClick={() => run(() => manager.pause(job, true))}>
+                    Cancel Render
+                  </button>
+                </>
+              )}
             </div>
             <label>
               <input
@@ -329,7 +364,7 @@ export const ArticleCacheView = observer(
                   : settings.settings.speechifyMonthlyBudget,
               });
               await manager.load();
-              setId(manager.jobs[0]?.id ?? "");
+              setId("");
               await refresh();
             })
           }
