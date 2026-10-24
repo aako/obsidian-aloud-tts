@@ -61,6 +61,13 @@ export class Editor {
 export class TFile {
   path: string = "";
   name: string = "";
+  extension: string = "md";
+}
+
+// Mock folder moves emitted by Obsidian's vault rename event.
+export class TFolder {
+  path: string = "";
+  name: string = "";
 }
 
 // Mock MarkdownView and related interfaces

@@ -6,6 +6,7 @@ import {
   Plugin,
   Notice,
   TFile,
+  TFolder,
   addIcon,
   requestUrl,
 } from "obsidian";
@@ -72,6 +73,30 @@ export default class TTSPlugin extends Plugin {
 
   async onload() {
     await this.loadSettings();
+
+    // A cache key is independent of vault path, but reading checkpoints and
+    // article job metadata aren't. Follow Obsidian's file AND folder renames.
+    this.registerEvent(
+      this.app.vault.on("rename", (file, oldPath) => {
+        if (
+          !(file instanceof TFolder) &&
+          !(file instanceof TFile && file.extension === "md")
+        )
+          return;
+        const newPath = file.path;
+        void (async () => {
+          try {
+            await this.progress.relocatePaths(oldPath, newPath);
+            await this.articleCache?.relocatePaths(oldPath, newPath);
+          } catch {
+            // Avoid logging private vault paths.
+            new Notice(
+              "Aloud could not update all moved-article metadata. Audio was not deleted. Check reading progress and article jobs.",
+            );
+          }
+        })();
+      }),
+    );
 
     // add right click menu to play selection
     this.registerEvent(

@@ -1,6 +1,7 @@
 import * as mobx from "mobx";
 import { Notice } from "obsidian";
 import type { App, DataAdapter } from "obsidian";
+import { relocatedVaultPath } from "./util/VaultPathRelocation";
 import {
   ActiveAudioText,
   AudioStore,
@@ -178,6 +179,56 @@ export class ReadingProgress {
 
   get latest(): SavedReading | undefined {
     return this.state.readings[this.state.latestKey];
+  }
+
+  /**
+   * Preserve exact reading checkpoints when Obsidian moves a note or folder.
+   * Retain text fingerprints and sentence anchors; never synthesize audio.
+   */
+  async relocatePaths(oldPath: string, newPath: string): Promise<void> {
+    if (!oldPath || !newPath || oldPath === newPath) return;
+    // Capture the active track's previous path before changing its source.
+    this.capture(true);
+    const readings = { ...this.state.readings };
+    let latestKey = this.state.latestKey;
+    let changed = false;
+    for (const [key, saved] of Object.entries(this.state.readings)) {
+      const path = relocatedVaultPath(saved.path, oldPath, newPath);
+      if (path === saved.path) continue;
+      changed = true;
+      const nextKey = readingKey(
+        path,
+        saved.start,
+        saved.end,
+        saved.fingerprint,
+      );
+      const relocated = { ...saved, path };
+      if (
+        !readings[nextKey] ||
+        readings[nextKey].updatedAt < relocated.updatedAt
+      ) {
+        readings[nextKey] = relocated;
+      }
+      delete readings[key];
+      if (latestKey === key) latestKey = nextKey;
+    }
+    const audio = this.active?.audio;
+    if (audio?.sourcePath) {
+      const next = relocatedVaultPath(audio.sourcePath, oldPath, newPath);
+      if (next !== audio.sourcePath) audio.sourcePath = next;
+    }
+    if (!changed) return;
+    this.state.readings = readings;
+    this.state.latestKey = latestKey;
+    this.trimReadings();
+    this.state.generation += 1;
+    const slot = this.files[this.state.generation % 2];
+    const payload = JSON.stringify(this.state);
+    const pending = this.writeQueue.then(() =>
+      this.adapter.write(slot, payload),
+    );
+    this.writeQueue = pending.catch(() => undefined);
+    await pending;
   }
 
   positionFor(opts: AudioTextOptions): number | undefined {
