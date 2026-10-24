@@ -14,6 +14,34 @@ const sharedRequests = new WeakMap<
   Map<string, Promise<AudioData>>
 >();
 
+interface SessionSynthesisSafety {
+  unsavedSynthesisKeys: Set<string>;
+  unplayableSynthesisKeys: Set<string>;
+}
+
+/**
+ * Keep paid-request recovery guards at the AudioSystem/session level, not the
+ * ChunkLoader level. Playback, export and article jobs create separate loaders.
+ * A WeakMap preserves barriers while the session lives without requiring any
+ * persisted cache metadata or holding an abandoned AudioSystem in memory.
+ */
+const sessionSynthesisSafety = new WeakMap<
+  AudioSystem,
+  SessionSynthesisSafety
+>();
+
+function safetyFor(system: AudioSystem): SessionSynthesisSafety {
+  let safety = sessionSynthesisSafety.get(system);
+  if (!safety) {
+    safety = {
+      unsavedSynthesisKeys: new Set<string>(),
+      unplayableSynthesisKeys: new Set<string>(),
+    };
+    sessionSynthesisSafety.set(system, safety);
+  }
+  return safety;
+}
+
 /** manages loading and caching of tracks */
 export class ChunkLoader {
   private MAX_BACKGROUND_REQUESTS = 3;
@@ -28,15 +56,13 @@ export class ChunkLoader {
    * cache write failed, don't silently buy the same audio again if it falls
    * out of the one-minute in-memory cache. A healthy cache hit may clear it.
    */
-  private unsavedSynthesisKeys = new Set<string>();
-  // A provider can have charged for WAV/PCM audio even if conversion fails.
-  // Never silently repeat that synthesis within the same plugin session.
-  private unplayableSynthesisKeys = new Set<string>();
+  private readonly synthesisSafety: SessionSynthesisSafety;
   private backgroundRequestProcessor: IntervalDaemon;
   private garbageCollector: IntervalDaemon;
 
   constructor({ system }: { system: AudioSystem }) {
     this.system = system;
+    this.synthesisSafety = safetyFor(system);
 
     this.backgroundRequestProcessor = IntervalDaemon(
       this.processBackgroundQueue.bind(this),
@@ -124,8 +150,9 @@ export class ChunkLoader {
     this.garbageCollector.stop();
     // Clear caches and queue on destroy
     this.localCache = [];
-    this.unsavedSynthesisKeys.clear();
-    this.unplayableSynthesisKeys.clear();
+    // Session safety barriers deliberately survive a single loader's
+    // destruction. Another loader may need them immediately after an export
+    // or player is closed.
     this.backgroundQueue = [];
     this.backgroundActiveCount = 0;
   }
@@ -282,14 +309,14 @@ export class ChunkLoader {
     // rather than causing a new billable generation.
     const cached = await this.system.storage.getAudio(text, options, "mp3");
     if (cached) {
-      this.unsavedSynthesisKeys.delete(requestKey);
-      this.unplayableSynthesisKeys.delete(requestKey);
+      this.synthesisSafety.unsavedSynthesisKeys.delete(requestKey);
+      this.synthesisSafety.unplayableSynthesisKeys.delete(requestKey);
       return cached;
     }
-    if (this.unsavedSynthesisKeys.has(requestKey)) {
+    if (this.synthesisSafety.unsavedSynthesisKeys.has(requestKey)) {
       throw new UnsavedAudioRequiresRecovery();
     }
-    if (this.unplayableSynthesisKeys.has(requestKey)) {
+    if (this.synthesisSafety.unplayableSynthesisKeys.has(requestKey)) {
       throw new AudioConversionRequiresRecovery();
     }
 
@@ -323,9 +350,9 @@ export class ChunkLoader {
     let playable: AudioData;
     try {
       playable = await convertToPlayableFormat(audio);
-      this.unplayableSynthesisKeys.delete(requestKey);
+      this.synthesisSafety.unplayableSynthesisKeys.delete(requestKey);
     } catch {
-      this.unplayableSynthesisKeys.add(requestKey);
+      this.synthesisSafety.unplayableSynthesisKeys.add(requestKey);
       throw new AudioConversionRequiresRecovery();
     }
 
@@ -333,9 +360,9 @@ export class ChunkLoader {
     // request would make another paid API call after audio was received.
     try {
       await this.system.storage.saveAudio(text, options, playable);
-      this.unsavedSynthesisKeys.delete(requestKey);
+      this.synthesisSafety.unsavedSynthesisKeys.delete(requestKey);
     } catch (error) {
-      this.unsavedSynthesisKeys.add(requestKey);
+      this.synthesisSafety.unsavedSynthesisKeys.add(requestKey);
       // Do not log raw storage errors: they may contain private vault paths.
       const category =
         error instanceof Error && /^[a-z][a-z0-9]{0,39}$/i.test(error.name)
