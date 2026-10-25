@@ -20,6 +20,8 @@ export interface AudioSink {
   currentTime: number;
   readonly trackStatus: TrackStatus;
   readonly bufferedStart: number | undefined;
+  /** Native output reported waiting/stalled; playback intent may still be true. */
+  readonly isPlaybackStalled?: boolean;
 
   play(): void;
   pause(): void;

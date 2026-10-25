@@ -16,6 +16,57 @@ export class WebAudioSink implements AudioSink {
   private _objectUrl: string | undefined;
   _isPlaying = false;
   onPlaybackFailure?: (error: unknown) => void;
+  private _isPlaybackStalled = false;
+  private stalledAtTime: number | undefined;
+
+  /**
+   * A MediaSource `waiting`/`stalled` event means we no longer trust the
+   * player clock as proof of audible progress. Intentional playback remains
+   * active so iOS may automatically resume when the buffer recovers.
+   */
+  get isPlaybackStalled(): boolean {
+    return this._isPlaybackStalled;
+  }
+
+  private resetStall(): void {
+    this._isPlaybackStalled = false;
+    this.stalledAtTime = undefined;
+  }
+
+  private restoreAfterStall(): boolean {
+    const from = this.stalledAtTime;
+    const now = this._audio.currentTime;
+    if (from == null || !Number.isFinite(now) || now - from <= 0.5) return true;
+
+    // The media clock advanced while output was reported stalled. That time
+    // cannot be assumed to have been heard. Rewind to the last known point.
+    const buffered = this._sourceBuffer.buffered;
+    let canReplay = false;
+    for (let index = 0; index < buffered.length; index++) {
+      if (from >= buffered.start(index) && from < buffered.end(index)) {
+        canReplay = true;
+        break;
+      }
+    }
+
+    if (canReplay) {
+      try {
+        this._audio.currentTime = from;
+        return true;
+      } catch {
+        // A failed native seek is safer to surface than silent text skipping.
+      }
+    }
+    // The previous audio was evicted or native seeking failed. Stop instead
+    // of advancing the reading bookmark across unconfirmed output.
+    this.pause();
+    this.onPlaybackFailure?.(
+      new Error(
+        "Aloud paused after a stall because unread audio could not be restored.",
+      ),
+    );
+    return false;
+  }
   private playGeneration = 0;
   private playPending = false;
   private mediaQueue: Promise<void> = Promise.resolve();
@@ -162,6 +213,7 @@ export class WebAudioSink implements AudioSink {
   }
 
   private async switchMediaNow(data: ArrayBuffer): Promise<void> {
+    this.resetStall();
     await onceBuffUpdateEnd(this._sourceBuffer);
     const buffered = this._sourceBuffer.buffered;
     if (buffered.length > 0) {
@@ -227,6 +279,7 @@ export class WebAudioSink implements AudioSink {
   }
 
   private async clearMediaNow(): Promise<void> {
+    this.resetStall();
     await onceBuffUpdateEnd(this._sourceBuffer);
     if (this._sourceBuffer.buffered.length > 0) {
       const wasZero = this._audio.currentTime === 0;
@@ -326,6 +379,7 @@ export class WebAudioSink implements AudioSink {
   };
 
   _onpause = (): void => {
+    this.resetStall();
     ++this.playGeneration;
     this.playPending = false;
     this._updateTrackStatus();
@@ -334,13 +388,27 @@ export class WebAudioSink implements AudioSink {
   };
 
   private _onMediaLifecycle = (event: Event): void => {
+    if (
+      (event.type === "waiting" || event.type === "stalled") &&
+      this._isPlaying &&
+      !this._isPlaybackStalled
+    ) {
+      this._isPlaybackStalled = true;
+      if (Number.isFinite(this._audio.currentTime))
+        this.stalledAtTime = this._audio.currentTime;
+    }
     if (event.type === "error" || event.type === "emptied") {
+      this.resetStall();
       mobx.runInAction(() => {
         this._isPlaying = false;
         this._updateTrackStatus();
       });
     }
-    if (event.type === "playing") this._updateTrackStatus();
+    if (event.type === "playing") {
+      if (this._isPlaybackStalled && !this.restoreAfterStall()) return;
+      this.resetStall();
+      this._updateTrackStatus();
+    }
     if (event.type === "error") {
       this.onPlaybackFailure?.(
         this._audio.error ?? new Error("Media element error"),

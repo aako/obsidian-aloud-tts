@@ -248,6 +248,7 @@ export class ChunkPlayer {
             this.activeAudioText.currentChunk?.timelineEndSeconds,
             this.activeAudioText.isPlaying,
             this.system.audioSink.isPlaying,
+            this.system.audioSink.isPlaybackStalled,
           )
         ) {
           continue;
@@ -430,6 +431,7 @@ const whenCurrentChunkDonePlaying = (
         chunkEnd,
         active.isPlaying,
         audioSink.isPlaying,
+        audioSink.isPlaybackStalled,
       )
     ) {
       return CancellablePromise.resolve();
