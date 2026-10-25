@@ -28,6 +28,8 @@ export interface AudioTextContext {
     signal?: AbortSignal;
     budgetLimit?: number;
     onWait?: () => void;
+    /** Durable provider-specific guard invoked AFTER budget reservation, BEFORE HTTP dispatch. */
+    beforeDispatch?: () => Promise<void>;
   };
   textBefore?: string;
   textAfter?: string;
