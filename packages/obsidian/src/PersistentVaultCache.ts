@@ -90,6 +90,12 @@ interface ChunkReference {
   size: number;
   digest: string;
 }
+
+interface RecoveryIndex {
+  complete: Map<string, ChunkReference[]>;
+  unfinished: Set<string>;
+}
+
 function validReference(value: unknown): value is ChunkReference {
   if (!value || typeof value !== "object") return false;
   const item = value as Partial<ChunkReference>;
@@ -108,6 +114,106 @@ export class PersistentVaultCache implements AudioCache {
   // Coordinate automatic playback saves with explicit article-precache saves.
   // One instance per vault avoids duplicate hash-named writes and quota races.
   private saveTail: Promise<void> = Promise.resolve();
+  /** Scan once for many sequential misses; refresh for later iCloud changes. */
+  private recoveryScan?: {
+    folder: string;
+    startedAt: number;
+    result: Promise<RecoveryIndex>;
+  };
+
+  private async orphanIndex(folder: string): Promise<RecoveryIndex> {
+    const now = Date.now();
+    if (
+      !this.recoveryScan ||
+      this.recoveryScan.folder !== folder ||
+      now - this.recoveryScan.startedAt >= 60_000
+    ) {
+      const result = (async (): Promise<RecoveryIndex> => {
+        const complete = new Map<string, ChunkReference[]>();
+        const unfinished = new Set<string>();
+        if (!(await this.adapter.exists(folder)))
+          return { complete, unfinished };
+        const listing = await this.adapter.list(folder);
+        for (const path of listing.files) {
+          if (!path.startsWith(`${folder}/`)) continue;
+          const name = path.slice(folder.length + 1);
+          const final = /^([a-f0-9]+)-([a-f0-9]{64})\.mp3$/.exec(name);
+          if (final) {
+            const previous = complete.get(final[1]) ?? [];
+            previous.push({ file: name, digest: final[2], size: 0 });
+            complete.set(final[1], previous);
+          } else {
+            // A crashed write may have left the binary in its .tmp stage.
+            // Never assume an unfinished file is playable or issue paid TTS.
+            const temporary =
+              /^([a-f0-9]+)-[a-f0-9]{64}\.mp3\.[a-f0-9-]+\.tmp$/.exec(name);
+            if (temporary) unfinished.add(temporary[1]);
+          }
+        }
+        return { complete, unfinished };
+      })();
+      this.recoveryScan = { folder, startedAt: now, result };
+    }
+    return this.recoveryScan.result;
+  }
+
+  private async recoverOrphan(
+    folder: string,
+    key: string,
+    format: MediaFormat,
+  ): Promise<AudioData | null> {
+    const candidates = await this.orphanIndex(folder);
+    const found = candidates.complete.get(key) ?? [];
+    if (found.length > 1)
+      throw new Error(
+        "Multiple unreferenced audio files exist for this chunk. No automatic paid regeneration; inspect the vault cache.",
+      );
+    if (!found.length) {
+      if (candidates.unfinished.has(key))
+        throw new Error(
+          "An unfinished vault audio write exists for this chunk. No automatic paid regeneration; inspect or restore the cache.",
+        );
+      return null;
+    }
+
+    const reference = found[0];
+    let data: ArrayBuffer;
+    try {
+      data = await this.adapter.readBinary(`${folder}/${reference.file}`);
+      if (!data.byteLength || (await digest(data)) !== reference.digest)
+        throw new Error("checksum mismatch");
+    } catch {
+      throw new Error(
+        "Unreferenced vault audio is incomplete or unavailable from iCloud. No automatic paid regeneration.",
+      );
+    }
+
+    // Another device could have synchronized metadata during our checksum read.
+    // In that case verify the authoritative metadata rather than overwrite it.
+    const base = `${folder}/${key}`;
+    const existing = await readSnapshot(this.adapter, base, validReference);
+    if (existing) {
+      const saved = await this.adapter.readBinary(
+        `${folder}/${existing.value.file}`,
+      );
+      if (
+        saved.byteLength !== existing.value.size ||
+        (await digest(saved)) !== existing.value.digest
+      )
+        throw new Error(
+          "Synced audio metadata refers to unavailable audio. No automatic paid regeneration.",
+        );
+      return { data: saved, format };
+    }
+    const restored = {
+      file: reference.file,
+      size: data.byteLength,
+      digest: reference.digest,
+    };
+    await writeSnapshot(this.adapter, base, 1, restored);
+    await writeSnapshot(this.adapter, base, 2, restored);
+    return { data, format };
+  }
 
   constructor(
     readonly adapter: DataAdapter,
@@ -125,15 +231,16 @@ export class PersistentVaultCache implements AudioCache {
   ): Promise<AudioData | null> {
     if (format !== "mp3") return null;
     const key = hashAudioInputs(text, settings, format);
+    const folder = this.folder;
     const saved = await readSnapshot(
       this.adapter,
-      `${this.folder}/${key}`,
+      `${folder}/${key}`,
       validReference,
     );
-    if (!saved) return null;
+    if (!saved) return this.recoverOrphan(folder, key, format);
     try {
       const data = await this.adapter.readBinary(
-        `${this.folder}/${saved.value.file}`,
+        `${folder}/${saved.value.file}`,
       );
       if (
         data.byteLength !== saved.value.size ||
