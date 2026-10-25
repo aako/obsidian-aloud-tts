@@ -11,6 +11,11 @@ vi.mock("./components/TTSPluginSettingsTab", () => ({
 }));
 
 vi.mock("open-tts", () => ({
+  TTSErrorInfo: class TTSErrorInfo extends Error {
+    get isRetryable(): boolean {
+      return false;
+    }
+  },
   loadAudioStore: vi.fn(() => ({})),
   createAudioSystem: vi.fn(() => ({
     audioStore: {},
