@@ -165,7 +165,7 @@ describe("native Speechify cancellation: protect already-dispatched audio", () =
     const audio = await synthesis;
     expect(new Uint8Array(audio.data)).toEqual(mp3Bytes);
     expect(storage.saveAudio).toHaveBeenCalledTimes(1);
-    expect(await storage.getAudio(optionsText, options, "mp3")).toEqual(audio);
+    expect(await storage.getAudio(optionsText)).toEqual(audio);
     // A subsequent read comes from the cache; no second billable request.
     await expect(loader.load(optionsText, options)).resolves.toEqual(audio);
     expect(native.send).toHaveBeenCalledTimes(1);
