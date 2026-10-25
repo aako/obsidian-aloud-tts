@@ -8,10 +8,12 @@ export function hasReachedChunkEnd(
   timelineEndSeconds: number | null | undefined,
   textIsPlaying: boolean,
   audioIsPlaying: boolean,
+  playbackStalled = false,
 ): boolean {
   return (
     textIsPlaying &&
     audioIsPlaying &&
+    !playbackStalled &&
     Number.isFinite(currentTime) &&
     timelineEndSeconds != null &&
     Number.isFinite(timelineEndSeconds) &&

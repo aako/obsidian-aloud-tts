@@ -77,6 +77,77 @@ describe("HTML audio rejection recovery", () => {
     sink.pause();
   });
 
+  it("rewinds a forward-jumping clock to the last buffered point after a stall", () => {
+    const element = document.createElement("audio");
+    vi.spyOn(element, "pause").mockImplementation(() => undefined);
+    vi.spyOn(element, "load").mockImplementation(() => undefined);
+    const source = {
+      buffered: { length: 1, start: () => 0, end: () => 60 },
+    } as unknown as SourceBuffer;
+    const sink = new WebAudioSink(element, source);
+    element.currentTime = 9.8;
+    element.dispatchEvent(new Event("play"));
+    element.dispatchEvent(new Event("playing"));
+    element.dispatchEvent(new Event("waiting"));
+    expect(sink.isPlaybackStalled).toBe(true);
+    expect(sink.isPlaying).toBe(true);
+    // Simulate the native clock moving forward while iOS outputs no sound.
+    element.currentTime = 23;
+    element.dispatchEvent(new Event("playing"));
+    expect(sink.isPlaybackStalled).toBe(false);
+    expect(element.currentTime).toBe(9.8);
+    expect(sink.isPlaying).toBe(true);
+    sink.destroy();
+  });
+
+  it("pauses rather than skipping when the audio at the stall checkpoint was evicted", () => {
+    const element = document.createElement("audio");
+    const pause = vi
+      .spyOn(element, "pause")
+      .mockImplementation(() => undefined);
+    vi.spyOn(element, "load").mockImplementation(() => undefined);
+    const source = {
+      buffered: { length: 1, start: () => 20, end: () => 40 },
+    } as unknown as SourceBuffer;
+    const sink = new WebAudioSink(element, source);
+    const failure = vi.fn();
+    sink.onPlaybackFailure = failure;
+    element.currentTime = 9.8;
+    element.dispatchEvent(new Event("play"));
+    element.dispatchEvent(new Event("waiting"));
+    element.currentTime = 25;
+    element.dispatchEvent(new Event("playing"));
+    expect(pause).toHaveBeenCalled();
+    expect(sink.isPlaying).toBe(false);
+    expect(sink.isPlaybackStalled).toBe(false);
+    expect(failure).toHaveBeenCalledTimes(1);
+    sink.destroy();
+  });
+
+  it("does not rewind on a normal short buffering recovery or after explicit pause", () => {
+    const element = document.createElement("audio");
+    vi.spyOn(element, "pause").mockImplementation(() => undefined);
+    vi.spyOn(element, "load").mockImplementation(() => undefined);
+    const sink = new WebAudioSink(element, {
+      buffered: { length: 1, start: () => 0, end: () => 40 },
+    } as unknown as SourceBuffer);
+    element.currentTime = 4;
+    element.dispatchEvent(new Event("play"));
+    element.dispatchEvent(new Event("stalled"));
+    element.currentTime = 4.2;
+    element.dispatchEvent(new Event("playing"));
+    expect(element.currentTime).toBe(4.2);
+    expect(sink.isPlaybackStalled).toBe(false);
+
+    element.dispatchEvent(new Event("stalled"));
+    sink.pause();
+    element.currentTime = 11;
+    element.dispatchEvent(new Event("playing"));
+    expect(element.currentTime).toBe(11);
+    expect(sink.isPlaybackStalled).toBe(false);
+    sink.destroy();
+  });
+
   it("observes rejected play promises and reports an error without throwing", async () => {
     const element = document.createElement("audio");
     vi.spyOn(element, "play").mockRejectedValue(
