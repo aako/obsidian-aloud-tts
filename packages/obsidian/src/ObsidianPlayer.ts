@@ -6,11 +6,13 @@ import { AudioData, MediaFormat } from "open-tts";
 import { IndexedDBAudioStorage } from "open-tts/browser";
 import * as mobx from "mobx";
 import type { PersistentVaultCache } from "./PersistentVaultCache";
+import type { SpeechifySynthesisJournal } from "./SpeechifySynthesisJournal";
 
 export function configurableAudioCache(
   app: App,
   settings: TTSPluginSettingsStore,
   persistent?: PersistentVaultCache,
+  synthesisJournal?: SpeechifySynthesisJournal,
 ): AudioCache & { destroy(): Promise<void> } {
   const createCache = (): AudioCache =>
     settings.settings.cacheType === "vault"
@@ -40,7 +42,11 @@ export function configurableAudioCache(
     pendingSharedKeys.add(key);
     const queued = sharedSaveTail
       .then(() => sharedCache.saveAudio(text, options, audio))
-      .then(() => {
+      .then(async () => {
+        // Only a completed persistent-vault write may retire the journal.
+        // Local IndexedDB playback may be evicted or the iCloud write interrupted.
+        if (options.modelProvider === "speechify")
+          await synthesisJournal?.audioSaved(text, options);
         failedSharedKeys.delete(key);
       })
       .catch((error: unknown) => {
@@ -83,6 +89,14 @@ export function configurableAudioCache(
   );
 
   return {
+    async checkSynthesisAllowed(text: string, options: TTSModelOptions) {
+      if (options.modelProvider === "speechify")
+        await synthesisJournal?.assertAllowed(text, options);
+    },
+    async beforeSynthesisDispatch(text: string, options: TTSModelOptions) {
+      if (options.modelProvider === "speechify")
+        await synthesisJournal?.beforeDispatch(text, options);
+    },
     async getAudio(
       text: string,
       settings: TTSModelOptions,
@@ -93,6 +107,12 @@ export function configurableAudioCache(
         const saved = await persistent?.getAudio(text, settings, format);
         if (saved) {
           failedSharedKeys.delete(hashAudioInputs(text, settings, format));
+          // getAudio() verifies persistent metadata and SHA-256 before returning.
+          if (settings.modelProvider === "speechify") {
+            void synthesisJournal
+              ?.audioSaved(text, settings)
+              .catch(() => undefined);
+          }
           return saved;
         }
       } catch (error) {

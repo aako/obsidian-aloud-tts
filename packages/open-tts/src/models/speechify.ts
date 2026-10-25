@@ -201,6 +201,11 @@ export async function speechifySynthesize(
   signal ??= context.request?.signal;
   return speechifyRequestGate.request(
     async () => {
+      // The request gate has reserved its budget. Persist a durable attempt
+      // marker before the native POST can reach Speechify.
+      await context.request?.beforeDispatch?.();
+      if (signal?.aborted)
+        throw new DOMException("Speechify request cancelled.", "AbortError");
       const response = await speechifyHttpRequest({
         url: `${ENDPOINT}/audio/${characters <= 2000 ? "speech" : "stream"}`,
         method: "POST",

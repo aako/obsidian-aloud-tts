@@ -27,6 +27,7 @@ import {
 } from "open-tts";
 import { AloudMediaSession } from "./MediaSessionController";
 import { createObsidianSpeechifyTransport } from "./SpeechifyNativeTransport";
+import { SpeechifySynthesisJournal } from "./SpeechifySynthesisJournal";
 import { TTSSettingTab } from "./components/TTSPluginSettingsTab";
 import { AudioSink } from "open-tts";
 import { WebAudioSink } from "open-tts/browser";
@@ -480,7 +481,16 @@ export default class TTSPlugin extends Plugin {
         "Audio couldn't resume. Return to Aloud and tap Continue or Resume saved article.",
       );
     };
-    const cache = configurableAudioCache(this.app, this.settings, persistent);
+    const speechifyJournal = new SpeechifySynthesisJournal(
+      adapter,
+      `${ledgerFolder}/speechify-incomplete-attempts`,
+    );
+    const cache = configurableAudioCache(
+      this.app,
+      this.settings,
+      persistent,
+      speechifyJournal,
+    );
     this.cache = cache;
     this.system = createAudioSystem({
       settings: () => this.settings.settings,

@@ -13,6 +13,15 @@ export interface AudioCache {
     settings: TTSModelOptions,
     audio: AudioData,
   ): Promise<void>;
+  /** Optional crash-recovery guard (used by Obsidian Speechify only). */
+  checkSynthesisAllowed?(
+    text: string,
+    settings: TTSModelOptions,
+  ): Promise<void>;
+  beforeSynthesisDispatch?(
+    text: string,
+    settings: TTSModelOptions,
+  ): Promise<void>;
   expire(ageInMillis: number): Promise<void>;
 
   /** Get's the cache's usage in bytes */

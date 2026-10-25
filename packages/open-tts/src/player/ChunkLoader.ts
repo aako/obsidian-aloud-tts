@@ -337,12 +337,27 @@ export class ChunkLoader {
       throw new SupersededAudioRequest();
     }
 
+    // Check any unresolved previous attempt before even reserving provider
+    // budget. This is separate from the marker written at network dispatch.
+    await this.system.storage.checkSynthesisAllowed?.(text, options);
+    const dispatchContext =
+      options.modelProvider === "speechify" &&
+      this.system.storage.beforeSynthesisDispatch
+        ? {
+            ...context,
+            request: {
+              ...context.request,
+              beforeDispatch: () =>
+                this.system.storage.beforeSynthesisDispatch!(text, options),
+            },
+          }
+        : context;
     // Call provider and convert to playable format
     const audio = await this.system.ttsModel.call(
       text,
       options,
       this.system.settings,
-      context,
+      dispatchContext,
       context.request?.signal,
     );
     // Conversion happens AFTER the provider has returned (potentially paid)

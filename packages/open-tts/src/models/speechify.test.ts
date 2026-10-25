@@ -134,6 +134,40 @@ describe("Speechify streaming", () => {
     });
   });
 
+  it("runs the durable guard only after budget reservation and before HTTP dispatch", async () => {
+    const events: string[] = [];
+    configureSpeechifyTransport(async () => {
+      events.push("post");
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => "application/json" },
+        json: async () => ({ audio_format: "mp3", audio_data: "//uQAQ==" }),
+        arrayBuffer: async () => new ArrayBuffer(0),
+      };
+    });
+    const beforeDispatch = vi.fn(async () => {
+      events.push("journal");
+    });
+    await speechifySynthesize("Hello!", options, settings, {
+      request: { beforeDispatch },
+    });
+    expect(events).toEqual(["journal", "post"]);
+    const blocked = vi.fn();
+    await expect(
+      speechifySynthesize(
+        "No budget",
+        options,
+        {
+          ...settings,
+          speechifyMonthlyBudget: 0,
+        },
+        { request: { beforeDispatch: blocked } },
+      ),
+    ).rejects.toThrow("budget reached");
+    expect(blocked).not.toHaveBeenCalled();
+  });
+
   it("starts with synthesis blocked and makes no request when the cap is zero", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     await expect(
