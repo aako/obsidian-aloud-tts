@@ -26,6 +26,7 @@ import {
   configureSpeechifyTransport,
 } from "open-tts";
 import { AloudMediaSession } from "./MediaSessionController";
+import { createObsidianSpeechifyTransport } from "./SpeechifyNativeTransport";
 import { TTSSettingTab } from "./components/TTSPluginSettingsTab";
 import { AudioSink } from "open-tts";
 import { WebAudioSink } from "open-tts/browser";
@@ -351,36 +352,7 @@ export default class TTSPlugin extends Plugin {
     // It buffers complete responses, matching Aloud's chunk-based playback.
     // Never try fetch first and retry a failed POST here: the first request
     // might have reached Speechify and incurred a charge.
-    configureSpeechifyTransport(
-      async ({ url, method, headers, body, signal }) => {
-        if (signal?.aborted)
-          throw new DOMException("Speechify request cancelled.", "AbortError");
-        const response = await requestUrl({
-          url,
-          method,
-          headers,
-          ...(body !== undefined ? { body } : {}),
-          throw: false,
-        });
-        // requestUrl does not support aborting an in-flight native request.
-        // Ignore its output if playback was cancelled while it was running.
-        if (signal?.aborted)
-          throw new DOMException("Speechify request cancelled.", "AbortError");
-        return {
-          status: response.status,
-          ok: response.status >= 200 && response.status < 300,
-          headers: {
-            get: (name: string): string | null =>
-              Object.entries(response.headers).find(
-                ([key]) => key.toLowerCase() === name.toLowerCase(),
-              )?.[1] ?? null,
-          },
-          // Keep JSON parsing lazy; successful MP3 responses are binary.
-          json: async (): Promise<unknown> => response.json,
-          arrayBuffer: async (): Promise<ArrayBuffer> => response.arrayBuffer,
-        };
-      },
-    );
+    configureSpeechifyTransport(createObsidianSpeechifyTransport(requestUrl));
     this.settings = await pluginSettingsStore(
       () => this.loadData(),
       (data) => this.saveData(data),
