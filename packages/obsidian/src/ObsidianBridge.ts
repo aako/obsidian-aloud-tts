@@ -23,6 +23,11 @@ import type { ReadingProgress } from "./ReadingProgress";
 import type { ArticleCache, ArticleJob } from "./ArticleCache";
 import { ArticleCacheModal } from "./components/ArticleCacheModal";
 import { selectCurrentArticleCacheJob } from "./components/ArticleCacheSelection";
+import {
+  exactReadingViewSourceRange,
+  isMarkdownReadingView,
+  readingViewSelection,
+} from "./ReadingViewPlayback";
 
 export interface ObsidianBridgeSpecifics {
   activeObsidianEditor: Editor | undefined;
@@ -558,7 +563,14 @@ export class ObsidianBridgeImpl implements ObsidianBridge {
       return;
     }
 
-    const focused = this.focusedEditorView;
+    const current = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (isMarkdownReadingView(current)) {
+      void this.playReadingView(current);
+      return;
+    }
+    // The sticky editor is useful for Edit View, but must not override a
+    // currently active Reading View (which has no CodeMirror selection).
+    const focused = current ?? this.focusedEditorView;
     if (focused?.editor) {
       this.triggerSelection(focused.file, focused.editor);
     } else {
@@ -566,17 +578,60 @@ export class ObsidianBridgeImpl implements ObsidianBridge {
     }
   }
 
+  private async playReadingView(view: MarkdownView): Promise<void> {
+    const file = view.file;
+    if (!file) {
+      new Notice("Open a saved note to listen in Reading View.");
+      return;
+    }
+    const selection = readingViewSelection(
+      view.containerEl,
+      (typeof activeWindow !== "undefined"
+        ? activeWindow
+        : window
+      ).getSelection(),
+    );
+    try {
+      const source = await this.app.vault.read(file);
+      if (!source.trim()) return;
+      const selected = selection
+        ? exactReadingViewSourceRange(source, selection)
+        : { text: source, start: 0, end: source.length };
+      if (!selected) {
+        // A rendered selection might contain Markdown decorations omitted from
+        // its source text. Speak it, but never invent bookmark source offsets.
+        this.playDetached(selection, file.path);
+        return;
+      }
+      const opts: AudioTextOptions = {
+        ...selected,
+        filename: file.path,
+        sourcePath: file.path,
+      };
+      opts.resumeChunkIndex = this.progress?.positionFor(opts);
+      await this.playSavedReading(opts);
+    } catch (error) {
+      console.warn("Aloud: Reading View playback could not start", error);
+      new Notice("Couldn't start Reading View playback. Check vault access.");
+    }
+  }
+
   async playDocument(): Promise<void> {
     const view =
-      this.focusedEditorView ??
-      this.app.workspace.getActiveViewOfType(MarkdownView);
-    if (!view?.editor) {
+      this.app.workspace.getActiveViewOfType(MarkdownView) ??
+      this.focusedEditorView;
+    if (!view) {
       new Notice("Focus a note first to play the complete document.");
       return;
     }
-    const text = view.editor.getValue();
-    if (!text.trim()) return;
     try {
+      // Preserve unsaved edits in Source Mode, but use the saved note itself
+      // when Reading View has no active CodeMirror editor.
+      const text =
+        isMarkdownReadingView(view) && view.file
+          ? await this.app.vault.read(view.file)
+          : view.editor.getValue();
+      if (!text.trim()) return;
       await this.playSavedReading({
         text,
         filename: view.file?.path ?? "Untitled",
@@ -597,12 +652,39 @@ export class ObsidianBridgeImpl implements ObsidianBridge {
     if (!this.articleCache) return;
     try {
       let opts: AudioTextOptions | undefined;
-      if (
-        scope === "saved" ||
-        (scope === "document" && !this.focusedEditorView?.editor)
-      )
+      const current = this.app.workspace.getActiveViewOfType(MarkdownView);
+      const reading = isMarkdownReadingView(current) ? current : null;
+      if (scope === "saved") {
         opts = await this.savedOptions();
-      else if (scope !== "manage") {
+      } else if (scope !== "manage" && reading?.file) {
+        const source = await this.app.vault.read(reading.file);
+        const selection =
+          scope === "selection"
+            ? readingViewSelection(
+                reading.containerEl,
+                (typeof activeWindow !== "undefined"
+                  ? activeWindow
+                  : window
+                ).getSelection(),
+              )
+            : "";
+        const mapped =
+          scope === "selection"
+            ? exactReadingViewSourceRange(source, selection)
+            : { text: source, start: 0, end: source.length };
+        if (!mapped) {
+          throw new Error(
+            "This rendered selection cannot be matched uniquely to Markdown. Play the selection instead, or pre-cache the full article.",
+          );
+        }
+        opts = {
+          ...mapped,
+          filename: reading.file.path,
+          sourcePath: reading.file.path,
+        };
+      } else if (scope === "document" && !this.focusedEditorView?.editor) {
+        opts = await this.savedOptions();
+      } else if (scope !== "manage") {
         const view = this.focusedEditorView;
         if (!view?.editor || !view.file)
           throw new Error("Focus a saved note first.");
