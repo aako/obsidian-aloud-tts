@@ -2,7 +2,10 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import * as React from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { AudioStore } from "open-tts";
-import { GlobalMobilePlayer } from "./GlobalMobilePlayer";
+import {
+  GlobalMobilePlayer,
+  GlobalMobilePlayerHost,
+} from "./GlobalMobilePlayer";
 import {
   createMockObsidianBridge,
   createTestSettingsStore,
@@ -118,7 +121,7 @@ describe("global phone dock", () => {
     }
   });
 
-  it("does not render the phone dock on a desktop", async () => {
+  it("shows a persistent Mac toolbar with the full menu", async () => {
     const player = samplePlayer(true);
     const settings = await createTestSettingsStore();
     render(
@@ -128,6 +131,98 @@ describe("global phone dock", () => {
         bridge={{ ...phoneBridge(), isMobile: () => false }}
       />,
     );
+    expect(screen.getByRole("toolbar", { name: "Aloud player" })).toBeTruthy();
+    expect(screen.getByText("Whose Leash.md")).toBeTruthy();
+    expect(screen.getByText("74 / 85")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Previous sentence" }));
+    fireEvent.click(screen.getByRole("button", { name: "Pause Aloud" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next sentence" }));
+    expect(player.activeText?.goToPrevious).toHaveBeenCalledOnce();
+    expect(player.activeText?.pause).toHaveBeenCalledOnce();
+    expect(player.activeText?.goToNext).toHaveBeenCalledOnce();
+    fireEvent.click(
+      screen.getByRole("button", { name: "More Aloud controls" }),
+    );
+    expect(screen.getByLabelText("Aloud playback menu")).toBeTruthy();
+    expect(screen.getByText("Manage Article Cache")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Close Aloud menu" }));
+    expect(screen.queryByLabelText("Aloud playback menu")).toBeNull();
+  });
+
+  it("offers play on an idle Mac Reading View note", async () => {
+    const player = samplePlayer(false);
+    const bridge = { ...phoneBridge(), isMobile: () => false };
+    const settings = await createTestSettingsStore();
+    render(
+      <GlobalMobilePlayer
+        player={player}
+        settings={settings}
+        bridge={bridge}
+      />,
+    );
+    expect(screen.getByRole("toolbar", { name: "Aloud player" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Play current note" }));
+    expect(bridge.playSelection).toHaveBeenCalledOnce();
+  });
+
+  it("hides the idle dock outside Markdown notes", async () => {
+    const player = samplePlayer(false);
+    const settings = await createTestSettingsStore();
+    render(
+      <GlobalMobilePlayer
+        player={player}
+        settings={settings}
+        bridge={{
+          ...phoneBridge(),
+          isMobile: () => false,
+          activeViewType: "empty",
+        }}
+      />,
+    );
     expect(screen.queryByRole("toolbar", { name: "Aloud player" })).toBeNull();
+  });
+
+  it("does not show a Mac bar on a mobile tablet", async () => {
+    const player = samplePlayer(true);
+    const settings = await createTestSettingsStore();
+    const before = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1024,
+    });
+    try {
+      render(
+        <GlobalMobilePlayer
+          player={player}
+          settings={settings}
+          bridge={phoneBridge()}
+        />,
+      );
+      expect(
+        screen.queryByRole("toolbar", { name: "Aloud player" }),
+      ).toBeNull();
+    } finally {
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        value: before,
+      });
+    }
+  });
+
+  it("mounts and removes the app-level Mac host", async () => {
+    const settings = await createTestSettingsStore();
+    const host = new GlobalMobilePlayerHost(samplePlayer(false), settings, {
+      ...phoneBridge(),
+      isMobile: () => false,
+    });
+    try {
+      expect(
+        await screen.findByRole("toolbar", { name: "Aloud player" }),
+      ).toBeTruthy();
+      expect(document.querySelector(".tts-global-desktop-host")).toBeTruthy();
+    } finally {
+      host.destroy();
+    }
+    expect(document.querySelector(".tts-global-desktop-host")).toBeNull();
   });
 });

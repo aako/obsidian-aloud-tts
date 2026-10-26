@@ -22,7 +22,11 @@ export class GlobalMobilePlayerHost {
     bridge: ObsidianBridge,
   ) {
     this.container = document.createElement("div");
-    this.container.className = "tts-global-mobile-host";
+    // The same AudioStore-backed dock serves iPhone and Mac. Keep the
+    // platform-specific position/size in CSS, not in a second player.
+    this.container.className = bridge.isMobile()
+      ? "tts-global-mobile-host"
+      : "tts-global-desktop-host";
     document.body.appendChild(this.container);
     this.root = createRoot(this.container);
     this.root.render(
@@ -62,10 +66,12 @@ export const GlobalMobilePlayer = observer(
       [player, settings, bridge],
     );
     const active = player.activeText;
-    const isPhone = bridge.isMobile() && window.innerWidth < 600;
+    const mobile = bridge.isMobile();
+    const isPhone = mobile && window.innerWidth < 600;
+    const isMac = !mobile;
     const hasNote = bridge.activeViewType === "markdown";
     const visible =
-      isPhone &&
+      (isPhone || isMac) &&
       (hasNote ||
         !!active ||
         bridge.hasSavedReading() ||
@@ -190,6 +196,7 @@ const DockButton: React.FC<{
     className={`tts-global-mobile-button${primary ? " is-primary" : ""}`}
     aria-label={label}
     aria-expanded={expanded}
+    aria-haspopup={expanded === undefined ? undefined : "menu"}
     disabled={disabled}
     onClick={onClick}
   >
