@@ -15,6 +15,7 @@ import * as React from "react";
 import { createRoot, Root } from "react-dom/client";
 import { IsPlaying } from "./components/ObsidianIsPlaying";
 import { AudioStore, AudioTextOptions } from "open-tts";
+import type { AudioSink } from "open-tts";
 import { hashString } from "open-tts";
 import { TTSPluginSettingsStore } from "open-tts";
 import { TTSEditorBridge } from "@open-tts/ui";
@@ -23,6 +24,7 @@ import type { ReadingProgress } from "./ReadingProgress";
 import type { ArticleCache, ArticleJob } from "./ArticleCache";
 import { ArticleCacheModal } from "./components/ArticleCacheModal";
 import { selectCurrentArticleCacheJob } from "./components/ArticleCacheSelection";
+import { scrollToSpokenRange } from "./ReadingViewHighlight";
 import {
   exactReadingViewSourceRange,
   isMarkdownReadingView,
@@ -58,6 +60,8 @@ export interface ObsidianBridge
   hasSavedReading(): boolean;
   resumeSavedReading(): Promise<void>;
   startOver(): Promise<void>;
+  jumpToPlayingLine(): boolean;
+  retryCurrentSentence(): boolean;
   readingProgressLabel(): string | undefined;
 }
 
@@ -134,6 +138,7 @@ export class ObsidianBridgeImpl implements ObsidianBridge {
     private progress?: ReadingProgress,
     private articleCache?: ArticleCache,
     readonly version?: string,
+    private readonly playbackSink?: AudioSink,
   ) {
     mobx.makeObservable(this, {
       active: mobx.observable.ref,
@@ -507,6 +512,68 @@ export class ObsidianBridgeImpl implements ObsidianBridge {
     } finally {
       this.readingActionPending = false;
     }
+  }
+
+  jumpToPlayingLine(): boolean {
+    const active = this.audio.activeText;
+    const chunk = active?.currentChunk;
+    const sourcePath = active?.audio.sourcePath;
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (!chunk || !sourcePath || !view?.file || view.file.path !== sourcePath) {
+      new Notice("Open the note currently playing to jump to its position.");
+      return false;
+    }
+    if (view.getMode() === "preview") {
+      const preview = view.containerEl.querySelector(".markdown-preview-view");
+      if (
+        !(preview instanceof HTMLElement) ||
+        !scrollToSpokenRange(preview, chunk.text)
+      ) {
+        new Notice(
+          "The spoken line cannot be located uniquely in Reading View.",
+        );
+        return false;
+      }
+      return true;
+    }
+    const editor = view.editor;
+    const text = editor.getValue();
+    if (
+      chunk.start < 0 ||
+      chunk.end > text.length ||
+      text.slice(chunk.start, chunk.end) !== chunk.rawText
+    ) {
+      new Notice("The note changed; the spoken line cannot be located safely.");
+      return false;
+    }
+    editor.scrollIntoView(
+      {
+        from: editor.offsetToPos(chunk.start),
+        to: editor.offsetToPos(chunk.end),
+      },
+      true,
+    );
+    return true;
+  }
+
+  retryCurrentSentence(): boolean {
+    const chunk = this.audio.activeText?.currentChunk;
+    const begin = chunk?.timelineStartSeconds;
+    const end = chunk?.timelineEndSeconds;
+    const sink = this.playbackSink;
+    if (
+      begin == null ||
+      end == null ||
+      !sink?.retryBufferedAt ||
+      end <= begin ||
+      !sink.retryBufferedAt(begin + Math.min(0.05, (end - begin) / 2))
+    ) {
+      new Notice(
+        "Current sentence is no longer in the audio buffer. No new audio was purchased.",
+      );
+      return false;
+    }
+    return true;
   }
 
   async startOver(): Promise<void> {

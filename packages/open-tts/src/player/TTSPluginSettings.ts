@@ -20,6 +20,8 @@ export type TTSPluginSettings = {
   /** Experimental extra end-of-sentence pause, in milliseconds. 0 preserves existing audio. */
   googleChirpSentencePauseMs: number;
   showPlayerView: PlayerViewMode;
+  floatingPlayerPosition: "top" | "bottom";
+  floatingPlayerWidth: "compact" | "full";
   showEditorActionButton: boolean;
   autoScrollPlayerView: boolean;
   version: number;
@@ -271,6 +273,8 @@ export const DEFAULT_SETTINGS: TTSPluginSettings = {
   speechifyModel: "simba-3.2",
   speechifyVoice: "geffen_32",
   showPlayerView: "always-mobile",
+  floatingPlayerPosition: "bottom",
+  floatingPlayerWidth: "compact",
   showEditorActionButton: true,
   autoScrollPlayerView: true,
   // gemini

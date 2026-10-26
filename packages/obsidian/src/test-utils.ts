@@ -27,6 +27,8 @@ export const createMockObsidianBridge = () => ({
   hasSavedReading: vi.fn(() => false),
   resumeSavedReading: vi.fn(),
   startOver: vi.fn(),
+  jumpToPlayingLine: vi.fn(() => true),
+  retryCurrentSentence: vi.fn(() => true),
   readingProgressLabel: vi.fn((): string | undefined => undefined),
   onTextChanged: vi.fn(),
   openSettings: vi.fn(),
