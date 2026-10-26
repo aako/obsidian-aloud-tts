@@ -678,6 +678,11 @@ details[open] .tts-error-details {
   }
 }
 
+/* ios.36: native, paint-only Reader View highlight. Never tint a full article. */
+::highlight(aloud-reading-current) {
+  background-color: rgba(var(--color-purple-rgb), 0.4);
+}
+
 /* ios.34: one phone control surface for both Reading and Edit views. */
 .tts-global-mobile-host {
   display: none;

@@ -15,6 +15,8 @@ export class WebAudioSink implements AudioSink {
   private _sourceBuffer: SourceBuffer;
   private _objectUrl: string | undefined;
   _isPlaying = false;
+  private readonly onAppForeground = (): void =>
+    this.reconcileNativePlaybackState();
   onPlaybackFailure?: (error: unknown) => void;
   private _isPlaybackStalled = false;
   private stalledAtTime: number | undefined;
@@ -160,6 +162,10 @@ export class WebAudioSink implements AudioSink {
     ]) {
       this._audio.addEventListener(event, this._onMediaLifecycle);
     }
+    // Keep the dock state accurate even when navigator.mediaSession is absent.
+    document.addEventListener("visibilitychange", this.onAppForeground);
+    window.addEventListener("pageshow", this.onAppForeground);
+    window.addEventListener("focus", this.onAppForeground);
   }
 
   seek(seconds: number = 1): void {
@@ -176,6 +182,17 @@ export class WebAudioSink implements AudioSink {
 
   get isPlaying(): boolean {
     return this._isPlaying;
+  }
+
+  /**
+   * iOS can pause HTML audio from AirPods / lock screen without delivering a
+   * JavaScript pause event until WebView returns to foreground. Reconcile its
+   * native paused flag; never infer resume from a missing event.
+   */
+  reconcileNativePlaybackState(): void {
+    if (this._audio.paused && (this._isPlaying || this.playPending)) {
+      mobx.runInAction(() => this._onpause());
+    }
   }
 
   get currentTime(): number {
@@ -458,6 +475,9 @@ export class WebAudioSink implements AudioSink {
     ]) {
       this._audio.removeEventListener(event, this._onMediaLifecycle);
     }
+    document.removeEventListener("visibilitychange", this.onAppForeground);
+    window.removeEventListener("pageshow", this.onAppForeground);
+    window.removeEventListener("focus", this.onAppForeground);
     this._audio.pause();
     try {
       if (this._sourceBuffer.buffered.length > 0) {

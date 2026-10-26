@@ -96,16 +96,8 @@ function createTTSHighlightField(
       const currentState = effects.reverse()[0]?.value || value;
 
       let currentTextPosition: { from: number; to: number } | undefined;
-      let textPosition: { from: number; to: number } | undefined;
 
       if (currentState.playerState?.playingTrack) {
-        const tracks = currentState.playerState.tracks;
-        if (tracks?.length) {
-          textPosition = {
-            from: tracks.at(0)!.start,
-            to: tracks.at(-1)!.end,
-          };
-        }
         const active = currentState.playerState.playingTrack;
         if (active) {
           currentTextPosition = {
@@ -121,15 +113,6 @@ function createTTSHighlightField(
         };
       } else {
         const b = new RangeSetBuilder<Decoration>();
-        if (textPosition) {
-          b.add(
-            textPosition.from,
-            currentTextPosition.from,
-            Decoration.mark({
-              class: "tts-cm-playing-before",
-            }),
-          );
-        }
         b.add(
           currentTextPosition.from,
           currentTextPosition.to,
@@ -137,15 +120,6 @@ function createTTSHighlightField(
             class: "tts-cm-playing-now",
           }),
         );
-        if (textPosition) {
-          b.add(
-            currentTextPosition.to,
-            textPosition.to,
-            Decoration.mark({
-              class: "tts-cm-playing-after",
-            }),
-          );
-        }
         const newDecoration = b.finish();
 
         if (
@@ -270,9 +244,6 @@ export function createTTSHighlightExtension(
     onAutoscroll,
   );
   const defaultTheme = EditorView.theme({
-    ".tts-cm-playing-before, .tts-cm-playing-after": {
-      backgroundColor: "rgba(128, 0, 128, 0.2)",
-    },
     ".tts-cm-playing-now": {
       backgroundColor: "rgba(128, 0, 128, 0.4)",
     },
