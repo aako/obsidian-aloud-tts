@@ -26,6 +26,8 @@ export interface AudioSink {
   play(): void;
   pause(): void;
   restart(): void;
+  /** User-initiated replay from retained native audio, never synthesis. */
+  retryBufferedAt?(seconds: number): boolean;
   setRate(rate: number): void;
 
   clearMedia(): Promise<void>;

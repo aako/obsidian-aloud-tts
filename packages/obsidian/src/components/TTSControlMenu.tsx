@@ -146,6 +146,40 @@ export const TTSControlMenuContent = observer(
             <>
               <div className="menu-separator" />
               <div className="menu-group">
+                {bridge && active?.audio.sourcePath && (
+                  <button
+                    className="menu-item tappable"
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      bridge.jumpToPlayingLine();
+                    }}
+                  >
+                    <span className="menu-item-icon">
+                      <ObsidianIcon icon="locate-fixed" />
+                    </span>
+                    <span className="menu-item-title">
+                      Jump to playing line
+                    </span>
+                  </button>
+                )}
+                {bridge && active?.currentChunk && (
+                  <button
+                    className="menu-item tappable"
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      bridge.retryCurrentSentence();
+                    }}
+                  >
+                    <span className="menu-item-icon">
+                      <ObsidianIcon icon="refresh-cw" />
+                    </span>
+                    <span className="menu-item-title">
+                      Retry current sentence (buffered only)
+                    </span>
+                  </button>
+                )}
                 {bridge?.hasSavedReading() && (
                   <button
                     className="menu-item tappable"

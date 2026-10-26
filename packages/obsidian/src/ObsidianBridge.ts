@@ -15,6 +15,7 @@ import * as React from "react";
 import { createRoot, Root } from "react-dom/client";
 import { IsPlaying } from "./components/ObsidianIsPlaying";
 import { AudioStore, AudioTextOptions } from "open-tts";
+import type { AudioSink } from "open-tts";
 import { hashString } from "open-tts";
 import { TTSPluginSettingsStore } from "open-tts";
 import { TTSEditorBridge } from "@open-tts/ui";
@@ -23,6 +24,7 @@ import type { ReadingProgress } from "./ReadingProgress";
 import type { ArticleCache, ArticleJob } from "./ArticleCache";
 import { ArticleCacheModal } from "./components/ArticleCacheModal";
 import { selectCurrentArticleCacheJob } from "./components/ArticleCacheSelection";
+import { scrollToSpokenRange } from "./ReadingViewHighlight";
 import {
   exactReadingViewSourceRange,
   isMarkdownReadingView,
@@ -39,6 +41,8 @@ export interface ObsidianBridge
   canPlayDetachedAudio: boolean;
   /** Observable active view kind; Reader/Editor Markdown both report markdown. */
   activeViewType?: string | null;
+  /** This note belongs to Innermaze, so Aloud must not render controls. */
+  isInnermazeContext?: boolean;
   /** Installed plugin manifest version, identical on all plugin interfaces. */
   readonly version?: string;
   // Obsidian-specific methods beyond the shared interface
@@ -58,6 +62,8 @@ export interface ObsidianBridge
   hasSavedReading(): boolean;
   resumeSavedReading(): Promise<void>;
   startOver(): Promise<void>;
+  jumpToPlayingLine(): boolean;
+  retryCurrentSentence(): boolean;
   readingProgressLabel(): string | undefined;
 }
 
@@ -108,6 +114,7 @@ export class ObsidianBridgeImpl implements ObsidianBridge {
 
   isDetachedAudio: boolean = false;
   activeViewType: string | null = null;
+  isInnermazeContext = false;
   private _playingIconRoot: Root | null = null;
   get detachedAudio(): boolean {
     return this.isDetachedAudio;
@@ -134,12 +141,14 @@ export class ObsidianBridgeImpl implements ObsidianBridge {
     private progress?: ReadingProgress,
     private articleCache?: ArticleCache,
     readonly version?: string,
+    private readonly playbackSink?: AudioSink,
   ) {
     mobx.makeObservable(this, {
       active: mobx.observable.ref,
       activeEditor: mobx.computed,
       activeObsidianEditor: mobx.observable.ref,
       activeViewType: mobx.observable,
+      isInnermazeContext: mobx.observable,
       canPlayDetachedAudio: mobx.computed,
       detachedAudio: mobx.computed,
       focusedEditorView: mobx.observable.ref,
@@ -155,6 +164,7 @@ export class ObsidianBridgeImpl implements ObsidianBridge {
     this._setFocusedEditor();
     this.app.workspace!.on("layout-change", this._onLayoutChange);
     this.app.workspace!.on("file-open", this._onFileOpen);
+    this.app.metadataCache?.on("changed", this._onMetadataChanged);
   }
   isMobile: () => boolean = () => {
     // docs show this... types do not https://docs.obsidian.md/Plugins/Getting+started/Mobile+development
@@ -378,15 +388,31 @@ export class ObsidianBridgeImpl implements ObsidianBridge {
       this.focusedEditorView; // is sticky
   };
 
+  private readonly _onMetadataChanged = (file: TFile): void => {
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (view?.file?.path === file.path) this._syncActiveViewType();
+  };
+
   _syncActiveViewType = () => {
     this.activeViewType =
       this.app.workspace.activeLeaf?.view.getViewType() || null;
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    const file = view?.file;
+    const frontmatter = file
+      ? this.app.metadataCache?.getFileCache(file)?.frontmatter
+      : undefined;
+    // Innermaze's own note marker, not the filename or folder location.
+    this.isInnermazeContext =
+      this.activeViewType === "innermaze-player" ||
+      (this.activeViewType === "markdown" &&
+        frontmatter?.voice_archive === true);
   };
 
   destroy: () => void = () => {
     this.app.workspace?.off("active-leaf-change", this._setFocusedEditor);
     this.app.workspace?.off("layout-change", this._onLayoutChange);
     this.app.workspace?.off("file-open", this._onFileOpen);
+    this.app.metadataCache?.off("changed", this._onMetadataChanged);
     if (this._playingIconRoot) {
       this._playingIconRoot.unmount();
       this._playingIconRoot = null;
@@ -507,6 +533,68 @@ export class ObsidianBridgeImpl implements ObsidianBridge {
     } finally {
       this.readingActionPending = false;
     }
+  }
+
+  jumpToPlayingLine(): boolean {
+    const active = this.audio.activeText;
+    const chunk = active?.currentChunk;
+    const sourcePath = active?.audio.sourcePath;
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (!chunk || !sourcePath || !view?.file || view.file.path !== sourcePath) {
+      new Notice("Open the note currently playing to jump to its position.");
+      return false;
+    }
+    if (view.getMode() === "preview") {
+      const preview = view.containerEl.querySelector(".markdown-preview-view");
+      if (
+        !(preview instanceof HTMLElement) ||
+        !scrollToSpokenRange(preview, chunk.text)
+      ) {
+        new Notice(
+          "The spoken line cannot be located uniquely in Reading View.",
+        );
+        return false;
+      }
+      return true;
+    }
+    const editor = view.editor;
+    const text = editor.getValue();
+    if (
+      chunk.start < 0 ||
+      chunk.end > text.length ||
+      text.slice(chunk.start, chunk.end) !== chunk.rawText
+    ) {
+      new Notice("The note changed; the spoken line cannot be located safely.");
+      return false;
+    }
+    editor.scrollIntoView(
+      {
+        from: editor.offsetToPos(chunk.start),
+        to: editor.offsetToPos(chunk.end),
+      },
+      true,
+    );
+    return true;
+  }
+
+  retryCurrentSentence(): boolean {
+    const chunk = this.audio.activeText?.currentChunk;
+    const begin = chunk?.timelineStartSeconds;
+    const end = chunk?.timelineEndSeconds;
+    const sink = this.playbackSink;
+    if (
+      begin == null ||
+      end == null ||
+      !sink?.retryBufferedAt ||
+      end <= begin ||
+      !sink.retryBufferedAt(begin + Math.min(0.05, (end - begin) / 2))
+    ) {
+      new Notice(
+        "Current sentence is no longer in the audio buffer. No new audio was purchased.",
+      );
+      return false;
+    }
+    return true;
   }
 
   async startOver(): Promise<void> {

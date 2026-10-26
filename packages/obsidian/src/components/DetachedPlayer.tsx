@@ -65,7 +65,8 @@ export const DetachedPlayerView = observer(
     // Unlike a CodeMirror panel it survives Source/Live Preview/Reading switches.
     const hasMarkdownNote = bridge.activeViewType === "markdown";
     const shouldShow =
-      hasMarkdownNote || hasDetachedPlayback || bridge.canPlayDetachedAudio;
+      !bridge.isInnermazeContext &&
+      (hasMarkdownNote || hasDetachedPlayback || bridge.canPlayDetachedAudio);
     const canOpenMenu = hasMarkdownNote || hasDetachedPlayback;
     const [isMenuOpen, setIsMenuOpen] = React.useState(false);
     const buttonRef = React.useRef<HTMLButtonElement | null>(null);

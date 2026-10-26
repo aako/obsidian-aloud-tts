@@ -72,6 +72,48 @@ vi.mock("obsidian", () => ({
 }));
 
 describe("ObsidianBridge", () => {
+  it("recognizes Innermaze recording frontmatter and reacts across Markdown notes", async () => {
+    const innermaze = Object.assign(new TFile(), {
+      path: "Voice Archive/Notes/recording.md",
+    });
+    const ordinary = Object.assign(new TFile(), { path: "Articles/read.md" });
+    let file = innermaze;
+    let metadataChanged: ((file: TFile) => void) | undefined;
+    const getFileCache = vi.fn((candidate: TFile) => ({
+      frontmatter: candidate === innermaze ? { voice_archive: true } : {},
+    }));
+    const app = {
+      workspace: {
+        on: vi.fn(),
+        off: vi.fn(),
+        activeLeaf: { view: { getViewType: () => "markdown" } },
+        getActiveViewOfType: vi.fn(() => ({ file })),
+      },
+      metadataCache: {
+        on: vi.fn((_event: string, handler: (file: TFile) => void) => {
+          metadataChanged = handler;
+        }),
+        off: vi.fn(),
+        getFileCache,
+      },
+    } as unknown as App;
+    const player = createTestAudioStore();
+    const bridge = new ObsidianBridgeImpl(
+      app,
+      player,
+      await createTestSettingsStore(),
+    );
+    expect(bridge.isInnermazeContext).toBe(true);
+    file = ordinary;
+    metadataChanged?.(ordinary);
+    expect(bridge.isInnermazeContext).toBe(false);
+    file = innermaze;
+    metadataChanged?.(innermaze);
+    expect(bridge.isInnermazeContext).toBe(true);
+    bridge.destroy();
+    player.destroy();
+  });
+
   it.each([false, true])(
     "starts over inside the first chunk (detached: %s)",
     async (detached: boolean) => {

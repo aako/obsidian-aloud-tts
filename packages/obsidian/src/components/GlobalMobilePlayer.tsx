@@ -1,5 +1,6 @@
 import * as React from "react";
 import { createRoot, type Root } from "react-dom/client";
+import * as mobx from "mobx";
 import { observer } from "mobx-react-lite";
 import { setIcon } from "obsidian";
 import {
@@ -15,6 +16,7 @@ import { TTSControlMenuContent } from "./TTSControlMenu";
 export class GlobalMobilePlayerHost {
   private readonly container: HTMLElement;
   private readonly root: Root;
+  private readonly stopLayoutReaction: () => void;
 
   constructor(
     player: AudioStore,
@@ -28,6 +30,17 @@ export class GlobalMobilePlayerHost {
       ? "tts-global-mobile-host"
       : "tts-global-desktop-host";
     document.body.appendChild(this.container);
+    this.stopLayoutReaction = mobx.reaction(
+      () => [
+        settings.settings.floatingPlayerPosition,
+        settings.settings.floatingPlayerWidth,
+      ],
+      ([position, width]) => {
+        this.container.classList.toggle("tts-player-top", position === "top");
+        this.container.classList.toggle("tts-player-full", width === "full");
+      },
+      { fireImmediately: true },
+    );
     this.root = createRoot(this.container);
     this.root.render(
       <ObsidianTooltipProvider>
@@ -41,6 +54,7 @@ export class GlobalMobilePlayerHost {
   }
 
   destroy(): void {
+    this.stopLayoutReaction();
     this.root.unmount();
     this.container.remove();
   }
@@ -71,6 +85,7 @@ export const GlobalMobilePlayer = observer(
     const isMac = !mobile;
     const hasNote = bridge.activeViewType === "markdown";
     const visible =
+      !bridge.isInnermazeContext &&
       (isPhone || isMac) &&
       (hasNote ||
         !!active ||
@@ -162,6 +177,12 @@ export const GlobalMobilePlayer = observer(
               label="Next sentence"
               disabled={!active}
               onClick={actions.next}
+            />
+            <DockButton
+              icon="locate-fixed"
+              label="Jump to playing line"
+              disabled={!active?.currentChunk || !active.audio.sourcePath}
+              onClick={() => bridge.jumpToPlayingLine()}
             />
             <DockButton
               icon="ellipsis"
