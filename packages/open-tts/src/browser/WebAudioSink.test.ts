@@ -170,6 +170,115 @@ describe("HTML audio rejection recovery", () => {
     sink.destroy();
   });
 
+  it("pauses a frozen foreground media clock without advancing it", () => {
+    vi.useFakeTimers();
+    try {
+      const element = document.createElement("audio");
+      vi.spyOn(element, "pause").mockImplementation(() => undefined);
+      vi.spyOn(element, "load").mockImplementation(() => undefined);
+      Object.defineProperty(element, "paused", {
+        configurable: true,
+        value: false,
+      });
+      Object.defineProperty(element, "readyState", {
+        configurable: true,
+        value: 4,
+      });
+      const sink = new WebAudioSink(element, {
+        buffered: { length: 1, start: () => 0, end: () => 30 },
+      } as unknown as SourceBuffer);
+      element.currentTime = 5;
+      const failure = vi.fn();
+      sink.onPlaybackFailure = failure;
+      element.dispatchEvent(new Event("play"));
+      vi.advanceTimersByTime(17000);
+      expect(failure).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(2000);
+      expect(failure).toHaveBeenCalledTimes(1);
+      expect(sink.isPlaying).toBe(false);
+      expect(element.currentTime).toBe(5);
+      sink.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fails closed when playback is stuck at an empty buffer boundary", () => {
+    vi.useFakeTimers();
+    try {
+      const element = document.createElement("audio");
+      vi.spyOn(element, "pause").mockImplementation(() => undefined);
+      vi.spyOn(element, "load").mockImplementation(() => undefined);
+      Object.defineProperty(element, "paused", {
+        configurable: true,
+        value: false,
+      });
+      Object.defineProperty(element, "readyState", {
+        configurable: true,
+        value: 2,
+      });
+      const sink = new WebAudioSink(element, {
+        buffered: { length: 0 },
+      } as unknown as SourceBuffer);
+      const failure = vi.fn();
+      sink.onPlaybackFailure = failure;
+      element.dispatchEvent(new Event("play"));
+      vi.advanceTimersByTime(34000);
+      expect(failure).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(2000);
+      expect(failure).toHaveBeenCalledTimes(1);
+      expect(sink.isPlaying).toBe(false);
+      sink.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps normal advancing playback alive during long foreground listening", () => {
+    vi.useFakeTimers();
+    try {
+      const element = document.createElement("audio");
+      vi.spyOn(element, "pause").mockImplementation(() => undefined);
+      vi.spyOn(element, "load").mockImplementation(() => undefined);
+      Object.defineProperty(element, "paused", {
+        configurable: true,
+        value: false,
+      });
+      Object.defineProperty(element, "readyState", {
+        configurable: true,
+        value: 4,
+      });
+      const sink = new WebAudioSink(element, {
+        buffered: { length: 1, start: () => 0, end: () => 100 },
+      } as unknown as SourceBuffer);
+      const failure = vi.fn();
+      sink.onPlaybackFailure = failure;
+      element.dispatchEvent(new Event("play"));
+      for (let second = 1; second <= 35; second++) {
+        element.currentTime = second;
+        vi.advanceTimersByTime(1000);
+      }
+      expect(failure).not.toHaveBeenCalled();
+      expect(sink.isPlaying).toBe(true);
+      sink.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("refuses replay of an evicted sentence without requesting new audio", () => {
+    const element = document.createElement("audio");
+    vi.spyOn(element, "pause").mockImplementation(() => undefined);
+    vi.spyOn(element, "load").mockImplementation(() => undefined);
+    const sink = new WebAudioSink(element, {
+      buffered: { length: 1, start: () => 10, end: () => 20 },
+    } as unknown as SourceBuffer);
+    element.currentTime = 15;
+    expect(sink.retryBufferedAt(4)).toBe(false);
+    expect(element.currentTime).toBe(15);
+    sink.destroy();
+  });
+
   it("observes rejected play promises and reports an error without throwing", async () => {
     const element = document.createElement("audio");
     vi.spyOn(element, "play").mockRejectedValue(

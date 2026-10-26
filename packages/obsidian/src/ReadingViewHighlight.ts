@@ -80,6 +80,32 @@ export function findReadingHighlightRange(
   return matches.length === 1 ? matches[0] : null;
 }
 
+/** Center the uniquely matched spoken range; never mutate rendered Markdown. */
+export function scrollToSpokenRange(
+  preview: HTMLElement,
+  spokenText: string,
+): boolean {
+  const range = findReadingHighlightRange(preview, spokenText);
+  if (!range) return false;
+  const rect = range.getClientRects?.()[0];
+  if (
+    rect &&
+    preview.clientHeight > 0 &&
+    typeof preview.scrollBy === "function"
+  ) {
+    const viewport = preview.getBoundingClientRect();
+    preview.scrollBy({
+      top: rect.top - viewport.top - preview.clientHeight / 2 + rect.height / 2,
+      behavior: "smooth",
+    });
+    return true;
+  }
+  const anchor = range.startContainer.parentElement;
+  if (!anchor || typeof anchor.scrollIntoView !== "function") return false;
+  anchor.scrollIntoView({ block: "center", behavior: "smooth" });
+  return true;
+}
+
 type HighlightRegistry = {
   set(name: string, value: unknown): void;
   delete(name: string): void;

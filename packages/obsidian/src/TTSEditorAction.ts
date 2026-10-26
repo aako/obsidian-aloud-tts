@@ -61,6 +61,7 @@ export class TTSEditorAction {
           this.addToLeaf(leaf);
         }
         this.pruneLeafStates();
+        this.syncInnermazeVisibility();
       }),
     );
 
@@ -73,6 +74,8 @@ export class TTSEditorAction {
     // React to setting changes
     const settingDisposer = autorun(() => {
       const show = this.settings.settings.showEditorActionButton;
+      // Observe note switches even when both notes are Markdown.
+      const innermaze = this.bridge.isInnermazeContext;
       if (show) {
         this.plugin.app.workspace.iterateAllLeaves((leaf) => {
           this.addToLeaf(leaf);
@@ -80,6 +83,7 @@ export class TTSEditorAction {
       } else {
         this.removeAllButtons();
       }
+      this.syncInnermazeVisibility(innermaze);
     });
     this.plugin.register(() => settingDisposer());
 
@@ -97,6 +101,17 @@ export class TTSEditorAction {
       this.disposeLeafState(leaf, state);
     }
     this.leafStates.clear();
+  }
+
+  private syncInnermazeVisibility(
+    innermaze = this.bridge.isInnermazeContext === true,
+  ): void {
+    const activeLeaf = this.plugin.app.workspace.activeLeaf;
+    for (const [leaf, state] of this.leafStates) {
+      state.button.style.display =
+        innermaze && leaf === activeLeaf ? "none" : "";
+    }
+    if (innermaze) this.closeMenu();
   }
 
   private removeAllButtons(): void {
@@ -173,6 +188,7 @@ export class TTSEditorAction {
   }
 
   private handleClick(evt: MouseEvent): void {
+    if (this.bridge.isInnermazeContext) return;
     // Stop propagation to prevent immediate close of menu
     evt.stopPropagation();
     evt.preventDefault();

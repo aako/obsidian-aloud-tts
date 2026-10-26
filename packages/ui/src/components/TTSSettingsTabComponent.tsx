@@ -81,6 +81,7 @@ export const TTSSettingsTabComponent: React.FC<{
 
       <SettingSection title="User Interface">
         <PlayerDisplayMode store={store} />
+        <FloatingPlayerLayout store={store} />
         <EditorActionButtonToggle store={store} />
       </SettingSection>
 
@@ -197,6 +198,57 @@ function describeMode(mode: PlayerViewMode): string {
       return "Never show";
   }
 }
+
+const FloatingPlayerLayout: React.FC<{
+  store: TTSPluginSettingsStore;
+}> = observer(({ store }) => (
+  <>
+    <div className="setting-item">
+      <div className="setting-item-info">
+        <div className="setting-item-name">Floating Play Bar Position</div>
+        <div className="setting-item-description">
+          Position the global playback bar at the top or bottom of the screen.
+        </div>
+      </div>
+      <div className="setting-item-control">
+        <select
+          aria-label="Floating Play Bar Position"
+          value={store.settings.floatingPlayerPosition}
+          onChange={(event) =>
+            void store.updateSettings({
+              floatingPlayerPosition: event.target.value as "top" | "bottom",
+            })
+          }
+        >
+          <option value="bottom">Bottom</option>
+          <option value="top">Top</option>
+        </select>
+      </div>
+    </div>
+    <div className="setting-item">
+      <div className="setting-item-info">
+        <div className="setting-item-name">Floating Play Bar Width</div>
+        <div className="setting-item-description">
+          Choose a compact floating bar or one spanning the window.
+        </div>
+      </div>
+      <div className="setting-item-control">
+        <select
+          aria-label="Floating Play Bar Width"
+          value={store.settings.floatingPlayerWidth}
+          onChange={(event) =>
+            void store.updateSettings({
+              floatingPlayerWidth: event.target.value as "compact" | "full",
+            })
+          }
+        >
+          <option value="compact">Compact</option>
+          <option value="full">Full width</option>
+        </select>
+      </div>
+    </div>
+  </>
+));
 
 const PlayerDisplayMode: React.FC<{
   store: TTSPluginSettingsStore;

@@ -26,6 +26,7 @@ function shouldShowPlayerView(
   settings: TTSPluginSettingsStore,
   obsidian: ObsidianBridge,
 ): boolean {
+  if (obsidian.isInnermazeContext) return false;
   const hasText = !!player.activeText;
   const isActiveEditor =
     editor === obsidian.activeEditor || obsidian.detachedAudio;

@@ -15,11 +15,66 @@ export class WebAudioSink implements AudioSink {
   private _sourceBuffer: SourceBuffer;
   private _objectUrl: string | undefined;
   _isPlaying = false;
-  private readonly onAppForeground = (): void =>
+  private readonly onAppForeground = (): void => {
+    this.lastObservedMediaTime = undefined;
+    this.lastMediaProgressAt = undefined;
     this.reconcileNativePlaybackState();
+  };
   onPlaybackFailure?: (error: unknown) => void;
   private _isPlaybackStalled = false;
   private stalledAtTime: number | undefined;
+  private playbackWatchdog?: ReturnType<typeof setInterval>;
+  private lastObservedMediaTime: number | undefined;
+  private lastMediaProgressAt: number | undefined;
+  private static readonly FOREGROUND_STALL_MS = 18000;
+  private static readonly BUFFER_UNDERRUN_MS = 35000;
+
+  /** A frozen native clock with playable audio must never advance a bookmark. */
+  private readonly checkPlaybackHealth = (): void => {
+    if (!this._isPlaying) {
+      if (this.playbackWatchdog) clearInterval(this.playbackWatchdog);
+      this.playbackWatchdog = undefined;
+    }
+    if (document.hidden || !this._isPlaying) {
+      this.lastMediaProgressAt = undefined;
+      this.lastObservedMediaTime = undefined;
+      return;
+    }
+    if (this._audio.paused) {
+      this.reconcileNativePlaybackState();
+      return;
+    }
+    const now = Date.now();
+    const time = this._audio.currentTime;
+    if (!Number.isFinite(time)) return;
+    if (
+      this.lastObservedMediaTime == null ||
+      this.lastMediaProgressAt == null ||
+      Math.abs(time - this.lastObservedMediaTime) > 0.15
+    ) {
+      this.lastObservedMediaTime = time;
+      this.lastMediaProgressAt = now;
+      return;
+    }
+    const buffered = this._sourceBuffer.buffered;
+    let bufferedAhead = false;
+    for (let index = 0; index < buffered.length; index++) {
+      if (time >= buffered.start(index) && time + 0.5 < buffered.end(index)) {
+        bufferedAhead = true;
+        break;
+      }
+    }
+    const outputShouldAdvance =
+      this._isPlaybackStalled || (bufferedAhead && this._audio.readyState >= 3);
+    const limit = outputShouldAdvance
+      ? WebAudioSink.FOREGROUND_STALL_MS
+      : WebAudioSink.BUFFER_UNDERRUN_MS;
+    if (now - this.lastMediaProgressAt < limit) return;
+    this.pause();
+    this.onPlaybackFailure?.(
+      new Error("Aloud stopped after a prolonged native audio stall."),
+    );
+  };
 
   /**
    * A MediaSource `waiting`/`stalled` event means we no longer trust the
@@ -390,12 +445,21 @@ export class WebAudioSink implements AudioSink {
   }
 
   _onplay = (): void => {
+    this.lastObservedMediaTime = undefined;
+    this.lastMediaProgressAt = undefined;
+    if (!this.playbackWatchdog) {
+      this.playbackWatchdog = setInterval(this.checkPlaybackHealth, 1000);
+    }
     this._updateTrackStatus();
     this.loopCheckCompletion();
     this._isPlaying = true;
   };
 
   _onpause = (): void => {
+    if (this.playbackWatchdog) clearInterval(this.playbackWatchdog);
+    this.playbackWatchdog = undefined;
+    this.lastObservedMediaTime = undefined;
+    this.lastMediaProgressAt = undefined;
     this.resetStall();
     ++this.playGeneration;
     this.playPending = false;
@@ -453,12 +517,32 @@ export class WebAudioSink implements AudioSink {
     this.loopCheckCompletion();
   };
 
+  /** Seek and replay only if the sentence is still held in the native buffer. */
+  retryBufferedAt(seconds: number): boolean {
+    if (!Number.isFinite(seconds)) return false;
+    const buffered = this._sourceBuffer.buffered;
+    let available = false;
+    for (let i = 0; i < buffered.length; i++) {
+      if (seconds >= buffered.start(i) && seconds < buffered.end(i) - 0.01) {
+        available = true;
+        break;
+      }
+    }
+    if (!available) return false;
+    this.pause();
+    this._audio.currentTime = seconds;
+    this.play();
+    return true;
+  }
+
   restart(): void {
     this._audio.currentTime = 0;
     this.play();
   }
 
   destroy(): void {
+    if (this.playbackWatchdog) clearInterval(this.playbackWatchdog);
+    this.playbackWatchdog = undefined;
     ++this.playGeneration;
     this.playPending = false;
     clearTimeout(this._completionChecker);
