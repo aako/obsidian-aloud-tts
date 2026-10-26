@@ -61,7 +61,12 @@ export const DetachedPlayerView = observer(
   }): React.ReactNode => {
     const active = player.activeText;
     const hasDetachedPlayback = bridge.detachedAudio && !!active;
-    const shouldShow = hasDetachedPlayback || bridge.canPlayDetachedAudio;
+    // Desktop status bar also exposes the same menu for ordinary Markdown notes.
+    // Unlike a CodeMirror panel it survives Source/Live Preview/Reading switches.
+    const hasMarkdownNote = bridge.activeViewType === "markdown";
+    const shouldShow =
+      hasMarkdownNote || hasDetachedPlayback || bridge.canPlayDetachedAudio;
+    const canOpenMenu = hasMarkdownNote || hasDetachedPlayback;
     const [isMenuOpen, setIsMenuOpen] = React.useState(false);
     const buttonRef = React.useRef<HTMLButtonElement | null>(null);
     const actions = React.useMemo(
@@ -100,8 +105,8 @@ export const DetachedPlayerView = observer(
     const title = active?.audio.filename || active?.audio.friendlyName;
 
     const handleClick = (): void => {
-      if (hasDetachedPlayback) {
-        setIsMenuOpen(true);
+      if (canOpenMenu) {
+        setIsMenuOpen((opened) => !opened);
         return;
       }
       bridge.playSelection();
@@ -115,18 +120,19 @@ export const DetachedPlayerView = observer(
             type="button"
             className="tts-detached-status-button"
             aria-label={
-              hasDetachedPlayback ? "Open playback controls" : "Play PDF audio"
+              canOpenMenu ? "Open playback controls" : "Play PDF audio"
             }
             aria-expanded={isMenuOpen}
-            aria-haspopup={hasDetachedPlayback ? "menu" : undefined}
+            aria-haspopup={canOpenMenu ? "menu" : undefined}
             onClick={handleClick}
           >
-            <ObsidianIcon
-              icon={hasDetachedPlayback ? "audio-lines" : "file-text"}
-            />
-            {hasDetachedPlayback ? (
-              <span className="tts-detached-status-title" title={title}>
-                {title}
+            <ObsidianIcon icon={canOpenMenu ? "audio-lines" : "file-text"} />
+            {canOpenMenu ? (
+              <span
+                className="tts-detached-status-title"
+                title={title ?? "Aloud"}
+              >
+                {active ? title : "Aloud"}
               </span>
             ) : (
               <span>Aloud PDF</span>
@@ -143,7 +149,7 @@ export const DetachedPlayerView = observer(
             </span>
           )}
         </div>
-        {isMenuOpen && hasDetachedPlayback && (
+        {isMenuOpen && canOpenMenu && (
           <div
             className="menu tts-detached-player-menu"
             onClick={(event) => event.stopPropagation()}
@@ -154,8 +160,8 @@ export const DetachedPlayerView = observer(
               settings={settings}
               bridge={bridge}
               onClose={() => setIsMenuOpen(false)}
-              showRestartFromCursor={false}
-              showAutoscroll={false}
+              showRestartFromCursor={hasMarkdownNote}
+              showAutoscroll={hasMarkdownNote}
             />
           </div>
         )}
