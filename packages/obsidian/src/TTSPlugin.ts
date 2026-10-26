@@ -44,6 +44,7 @@ import { configurableAudioCache } from "./ObsidianPlayer";
 import { ProxiedTTSModel } from "./ProxiedTTSModel";
 import { TTSEditorAction } from "./TTSEditorAction";
 import { DetachedPlayerHost } from "./components/DetachedPlayer";
+import { GlobalMobilePlayerHost } from "./components/GlobalMobilePlayer";
 
 // standard lucide.dev icon, but for some reason not working as a ribbon icon without registering it
 // https://lucide.dev/icons/audio-lines
@@ -60,6 +61,7 @@ export default class TTSPlugin extends Plugin {
   cache: { destroy: () => void | Promise<void> } | undefined;
   editorAction: TTSEditorAction | undefined;
   detachedPlayerHost: DetachedPlayerHost | undefined;
+  globalMobilePlayerHost: GlobalMobilePlayerHost | undefined;
   private _playerSyncDisposer: (() => void) | undefined;
   private progress: ReadingProgress;
   private mediaSession?: AloudMediaSession;
@@ -209,6 +211,11 @@ export default class TTSPlugin extends Plugin {
       this.audio,
       this.bridge,
     );
+    this.globalMobilePlayerHost = new GlobalMobilePlayerHost(
+      this.player,
+      this.settings,
+      this.bridge,
+    );
 
     // this pause/resumes the current audio, or initiates a new audio if nothing is playing
     this.addCommand({
@@ -340,6 +347,7 @@ export default class TTSPlugin extends Plugin {
     await this.progress?.stop();
     this.mediaSession?.destroy();
     this.detachedPlayerHost?.destroy();
+    this.globalMobilePlayerHost?.destroy();
     this.editorAction?.destroy();
     this._playerSyncDisposer?.();
     this.player?.destroy();

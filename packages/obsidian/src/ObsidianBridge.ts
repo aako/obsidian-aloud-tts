@@ -37,6 +37,8 @@ export interface ObsidianBridge
   extends TTSEditorBridge,
     ObsidianBridgeSpecifics {
   canPlayDetachedAudio: boolean;
+  /** Observable active view kind; Reader/Editor Markdown both report markdown. */
+  activeViewType?: string | null;
   /** Installed plugin manifest version, identical on all plugin interfaces. */
   readonly version?: string;
   // Obsidian-specific methods beyond the shared interface

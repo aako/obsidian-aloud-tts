@@ -51,6 +51,30 @@ describe("DetachedPlayerView", () => {
     expect(screen.queryByRole("button")).toBeNull();
   });
 
+  it("provides an idle Markdown status-bar menu on Mac with normal reading actions", async () => {
+    const player = { ...createPlayer(), activeText: null } as AudioStore;
+    const settings = await createTestSettingsStore();
+    const bridge = {
+      ...createMockObsidianBridge(),
+      activeViewType: "markdown",
+    };
+
+    render(
+      <DetachedPlayerView
+        player={player}
+        settings={settings}
+        sink={createSink()}
+        bridge={bridge}
+      />,
+    );
+    expect(screen.getByText("Aloud")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("Open playback controls"));
+    expect(screen.getByText("Play Entire Document")).toBeTruthy();
+    expect(screen.getByText("Manage Article Cache")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("Open playback controls"));
+    expect(screen.queryByText("Play Entire Document")).toBeNull();
+  });
+
   it("renders a status bar PDF button before playback starts", async () => {
     const player = { ...createPlayer(), activeText: null } as AudioStore;
     const settings = await createTestSettingsStore();
