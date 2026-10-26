@@ -678,7 +678,6 @@ details[open] .tts-error-details {
   }
 }
 
-
 /* ios.34: one phone control surface for both Reading and Edit views. */
 .tts-global-mobile-host {
   display: none;
@@ -690,7 +689,10 @@ details[open] .tts-error-details {
     position: fixed;
     left: 0;
     right: 0;
-    bottom: calc(var(--mobile-toolbar-height, 52px) + env(safe-area-inset-bottom, 0px) + 6px);
+    bottom: calc(
+      var(--mobile-toolbar-height, 52px) + env(safe-area-inset-bottom, 0px) +
+        6px
+    );
     z-index: 1150;
     pointer-events: none;
   }
@@ -784,7 +786,10 @@ details[open] .tts-error-details {
     position: absolute;
     left: 8px;
     right: 8px;
-    bottom: calc(var(--mobile-toolbar-height, 52px) + env(safe-area-inset-bottom, 0px) + 112px);
+    bottom: calc(
+      var(--mobile-toolbar-height, 52px) + env(safe-area-inset-bottom, 0px) +
+        112px
+    );
     width: auto;
     max-width: 560px;
     max-height: min(65dvh, 580px);
