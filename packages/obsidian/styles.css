@@ -800,6 +800,124 @@ details[open] .tts-error-details {
   }
 }
 
+/* ios.35: Mac uses the same shared dock, floating above the status bar. */
+.tts-global-desktop-host {
+  position: fixed;
+  right: 18px;
+  bottom: 38px;
+  width: min(430px, calc(100vw - 36px));
+  z-index: 1150;
+  pointer-events: none;
+}
+
+.tts-global-desktop-host .tts-global-mobile-dock {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  padding: 7px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 12px;
+  background: var(--background-secondary);
+  box-shadow: 0 3px 18px rgba(0, 0, 0, 0.3);
+  pointer-events: auto;
+}
+
+.tts-global-desktop-host .tts-global-mobile-caption {
+  box-sizing: border-box;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
+  padding-left: 5px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.tts-global-desktop-host .tts-global-mobile-title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text-normal);
+}
+
+.tts-global-desktop-host .tts-global-mobile-progress {
+  font-variant-numeric: tabular-nums;
+}
+
+.tts-global-desktop-host .tts-global-mobile-buttons {
+  display: grid;
+  flex: none;
+  grid-template-columns: repeat(4, 38px);
+  gap: 4px;
+}
+
+.tts-global-desktop-host .tts-global-mobile-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 38px;
+  min-width: 0;
+  min-height: 40px;
+  padding: 4px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+  cursor: pointer;
+}
+
+.tts-global-desktop-host .tts-global-mobile-button.is-primary {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.tts-global-desktop-host .tts-global-mobile-button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.tts-global-desktop-host .tts-global-mobile-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: auto;
+}
+
+.tts-global-desktop-host .tts-global-mobile-backdrop {
+  display: block;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.tts-global-desktop-host .menu.tts-global-mobile-menu {
+  position: fixed;
+  left: auto;
+  right: 18px;
+  bottom: 103px;
+  width: min(385px, calc(100vw - 36px));
+  max-height: calc(100dvh - 125px);
+  margin: 0;
+  overflow-y: auto;
+  z-index: 2;
+  transform: none;
+  pointer-events: auto;
+}
+
+.tts-global-desktop-host .tts-global-mobile-menu .menu-grabber {
+  display: none;
+}
+
 /* Anchored Aloud desktop controls: never turn desktop into the mobile sheet. */
 .menu.tts-desktop-controls {
   position: fixed;
