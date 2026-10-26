@@ -31,6 +31,28 @@ describe("HTML audio rejection recovery", () => {
     sink.destroy();
   });
 
+  it("reconciles a native AirPods pause after lock-screen suspension even if JS missed pause", () => {
+    const element = document.createElement("audio");
+    const sink = new WebAudioSink(element, {
+      buffered: { length: 0 },
+    } as SourceBuffer);
+    Object.defineProperty(element, "paused", {
+      configurable: true,
+      value: false,
+    });
+    element.dispatchEvent(new Event("play"));
+    expect(sink.isPlaying).toBe(true);
+    Object.defineProperty(element, "paused", {
+      configurable: true,
+      value: true,
+    });
+    // Native stopped on the lock screen; WKWebView never delivered pause.
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(sink.isPlaying).toBe(false);
+    expect(sink.trackStatus).toBe("paused");
+    sink.destroy();
+  });
+
   it("does not treat a remote Pause near the buffer end as completion", () => {
     const element = document.createElement("audio");
     element.currentTime = 9.9;

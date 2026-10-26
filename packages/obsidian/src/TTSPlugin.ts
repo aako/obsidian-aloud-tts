@@ -45,6 +45,7 @@ import { ProxiedTTSModel } from "./ProxiedTTSModel";
 import { TTSEditorAction } from "./TTSEditorAction";
 import { DetachedPlayerHost } from "./components/DetachedPlayer";
 import { GlobalMobilePlayerHost } from "./components/GlobalMobilePlayer";
+import { ReadingViewHighlight } from "./ReadingViewHighlight";
 
 // standard lucide.dev icon, but for some reason not working as a ribbon icon without registering it
 // https://lucide.dev/icons/audio-lines
@@ -65,6 +66,7 @@ export default class TTSPlugin extends Plugin {
   private _playerSyncDisposer: (() => void) | undefined;
   private progress: ReadingProgress;
   private mediaSession?: AloudMediaSession;
+  private readingHighlight?: ReadingViewHighlight;
   private articleCache?: ArticleCache;
 
   get player(): AudioStore {
@@ -330,6 +332,7 @@ export default class TTSPlugin extends Plugin {
       this.player,
       this.bridge,
     );
+    this.readingHighlight = new ReadingViewHighlight(this.app, this.player);
     this.registerEditorExtension(
       TTSCodeMirror(this.player, this.settings, this.audio, this.bridge),
     );
@@ -346,6 +349,7 @@ export default class TTSPlugin extends Plugin {
     await this.articleCache?.stop();
     await this.progress?.stop();
     this.mediaSession?.destroy();
+    this.readingHighlight?.destroy();
     this.detachedPlayerHost?.destroy();
     this.globalMobilePlayerHost?.destroy();
     this.editorAction?.destroy();

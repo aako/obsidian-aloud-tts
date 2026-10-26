@@ -11,7 +11,14 @@ export class AloudMediaSession {
   private ownedMetadata: MediaMetadata | null = null;
   private ownsSession = false;
   private readonly installed: MediaSessionAction[] = [];
-  private readonly onForeground = (): void => this.sync();
+  private readonly onForeground = (): void => {
+    (
+      this.sink as AudioSink & {
+        reconcileNativePlaybackState?: () => void;
+      }
+    ).reconcileNativePlaybackState?.();
+    this.sync();
+  };
   private readonly onMediaEvent = (event: Event): void => {
     if (event.type === "playing") this.playingConfirmed = true;
     if (
@@ -51,6 +58,7 @@ export class AloudMediaSession {
     }
     document.addEventListener("visibilitychange", this.onForeground);
     window.addEventListener("pageshow", this.onForeground);
+    window.addEventListener("focus", this.onForeground);
     this.disposeReaction = mobx.reaction(
       () => [
         this.player.activeText,
@@ -134,6 +142,7 @@ export class AloudMediaSession {
   destroy(): void {
     document.removeEventListener("visibilitychange", this.onForeground);
     window.removeEventListener("pageshow", this.onForeground);
+    window.removeEventListener("focus", this.onForeground);
     this.disposeReaction?.();
     if (this.element) {
       for (const name of [

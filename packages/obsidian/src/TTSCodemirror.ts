@@ -103,9 +103,6 @@ const obsidianTheme = EditorView.theme({
   ".cm-panels-top": {
     borderBottom: `1px solid var(--background-modifier-border)`,
   },
-  ".tts-cm-playing-before, .tts-cm-playing-after": {
-    backgroundColor: "rgba(var(--color-purple-rgb), 0.2)",
-  },
   ".tts-cm-playing-now": {
     backgroundColor: "rgba(var(--color-purple-rgb), 0.4)",
   },
