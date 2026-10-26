@@ -17,9 +17,11 @@ function samplePlayer(active: boolean): AudioStore {
       ? {
           audio: {
             filename: "Articles/Whose Leash.md",
+            sourcePath: "Articles/Whose Leash.md",
             chunks: Array.from({ length: 85 }, () => ({})),
           },
           position: 73,
+          currentChunk: { text: "Currently spoken words." },
           isPlaying: true,
           pause: vi.fn(),
           play: vi.fn(),
@@ -118,6 +120,56 @@ describe("global phone dock", () => {
         configurable: true,
         value: previousWidth,
       });
+    }
+  });
+
+  it("jumps to the playing line without altering audio position", async () => {
+    const player = samplePlayer(true);
+    const bridge = phoneBridge();
+    const settings = await createTestSettingsStore();
+    const before = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 390,
+    });
+    try {
+      render(
+        <GlobalMobilePlayer
+          player={player}
+          settings={settings}
+          bridge={bridge}
+        />,
+      );
+      fireEvent.click(
+        screen.getByRole("button", { name: "Jump to playing line" }),
+      );
+      expect(bridge.jumpToPlayingLine).toHaveBeenCalledOnce();
+      expect(player.activeText?.position).toBe(73);
+    } finally {
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        value: before,
+      });
+    }
+  });
+
+  it("reacts to top and full-width settings without replacing the player", async () => {
+    const settings = await createTestSettingsStore();
+    const host = new GlobalMobilePlayerHost(samplePlayer(false), settings, {
+      ...phoneBridge(),
+      isMobile: () => false,
+    });
+    try {
+      const container = document.querySelector(".tts-global-desktop-host");
+      expect(container?.classList.contains("tts-player-top")).toBe(false);
+      await settings.updateSettings({
+        floatingPlayerPosition: "top",
+        floatingPlayerWidth: "full",
+      });
+      expect(container?.classList.contains("tts-player-top")).toBe(true);
+      expect(container?.classList.contains("tts-player-full")).toBe(true);
+    } finally {
+      host.destroy();
     }
   });
 

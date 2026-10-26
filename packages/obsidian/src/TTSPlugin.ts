@@ -328,6 +328,25 @@ export default class TTSPlugin extends Plugin {
       },
     });
 
+    this.addCommand({
+      id: "jump-to-playing-line",
+      name: "Jump to playing line",
+      checkCallback: (checking) => {
+        if (!this.player.activeText?.currentChunk) return false;
+        if (!checking) this.bridge.jumpToPlayingLine();
+        return true;
+      },
+    });
+    this.addCommand({
+      id: "retry-current-sentence",
+      name: "Retry current sentence from buffered audio",
+      checkCallback: (checking) => {
+        if (!this.player.activeText?.currentChunk) return false;
+        if (!checking) this.bridge.retryCurrentSentence();
+        return true;
+      },
+    });
+
     this._playerSyncDisposer = createPlayerSynchronizer(
       this.player,
       this.bridge,
@@ -490,7 +509,7 @@ export default class TTSPlugin extends Plugin {
         hidden: document.hidden,
       });
       new Notice(
-        "Audio couldn't resume. Return to Aloud and tap Continue or Resume saved article.",
+        "Aloud audio stopped. Use Retry current sentence in the player menu; no new audio will be generated.",
       );
     };
     const speechifyJournal = new SpeechifySynthesisJournal(
@@ -555,6 +574,7 @@ export default class TTSPlugin extends Plugin {
       this.progress,
       this.articleCache,
       this.manifest.version,
+      audio,
     );
     this.progress.start();
     this.mediaSession = new AloudMediaSession(this.player, audio);

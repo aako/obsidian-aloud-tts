@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest";
-import { findReadingHighlightRange } from "./ReadingViewHighlight";
+import { describe, expect, it, vi } from "vitest";
+import {
+  findReadingHighlightRange,
+  scrollToSpokenRange,
+} from "./ReadingViewHighlight";
 
 describe("Reading View current sentence paint ranges", () => {
   it("matches a sentence across emphasized inline text without altering HTML", () => {
@@ -41,6 +44,19 @@ describe("Reading View current sentence paint ranges", () => {
       '<div class="internal-embed"><p>Embedded sentence.</p></div>';
     expect(findReadingHighlightRange(root, "Embedded sentence.")).toBeNull();
     expect(findReadingHighlightRange(root, "Visible words.")).not.toBeNull();
+  });
+
+  it("jumps only to a unique rendered sentence without modifying Markdown", () => {
+    const root = document.createElement("div");
+    root.innerHTML = "<p>First sentence. Spoken sentence. Last sentence.</p>";
+    const original = root.innerHTML;
+    const block = root.querySelector("p")!;
+    block.scrollIntoView = vi.fn();
+    expect(scrollToSpokenRange(root, "Spoken sentence.")).toBe(true);
+    expect(block.scrollIntoView).toHaveBeenCalled();
+    expect(root.innerHTML).toBe(original);
+    root.innerHTML = "<p>Repeated sentence.</p><p>Repeated sentence.</p>";
+    expect(scrollToSpokenRange(root, "Repeated sentence.")).toBe(false);
   });
 
   it("does not mistake text inside a longer word for the spoken group", () => {
