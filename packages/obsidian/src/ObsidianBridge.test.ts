@@ -72,6 +72,63 @@ vi.mock("obsidian", () => ({
 }));
 
 describe("ObsidianBridge", () => {
+  it("starts the full saved note at the selected sentence instead of reading only the selection", async () => {
+    const text =
+      "The first sentence is sufficiently long to be its own chunk. " +
+      "The second sentence is similarly long to stand by itself. " +
+      "The third sentence is the requested starting point and should continue.";
+    const file = Object.assign(new TFile(), { path: "Article.md" });
+    const view = {
+      file,
+      containerEl: document.createElement("div"),
+      getViewType: () => "markdown",
+      getMode: () => "preview",
+    };
+    const app = {
+      workspace: {
+        activeLeaf: { view },
+        on: vi.fn(),
+        off: vi.fn(),
+        getActiveViewOfType: vi.fn(() => view),
+      },
+      vault: { read: vi.fn(async () => text) },
+    } as unknown as App;
+    const player = createTestAudioStore();
+    const bridge = new ObsidianBridgeImpl(
+      app,
+      player,
+      await createTestSettingsStore(),
+    );
+    const started = vi.spyOn(player, "startPlayer");
+    await bridge.playFromHere({
+      sourcePath: file.path,
+      renderedText: "The third sentence is the requested starting point",
+    });
+    expect(started).toHaveBeenCalledOnce();
+    expect(started).toHaveBeenCalledWith(
+      expect.objectContaining({
+        filename: file.path,
+        sourcePath: file.path,
+        text,
+        start: 0,
+        end: text.length,
+        resumeChunkIndex: expect.any(Number),
+      }),
+    );
+    expect(player.activeText?.position).toBeGreaterThan(0);
+    expect(player.activeText?.audio.chunks.length).toBeGreaterThan(
+      player.activeText?.position ?? 0,
+    );
+
+    // A saved selection from a different note must never be used here.
+    await bridge.playFromHere({
+      sourcePath: "Other.md",
+      renderedText: "The third sentence",
+    });
+    expect(started).toHaveBeenCalledOnce();
+    bridge.destroy();
+    player.destroy();
+  });
   it("recognizes Innermaze recording frontmatter and reacts across Markdown notes", async () => {
     const innermaze = Object.assign(new TFile(), {
       path: "Voice Archive/Notes/recording.md",
@@ -104,9 +161,11 @@ describe("ObsidianBridge", () => {
       await createTestSettingsStore(),
     );
     expect(bridge.isInnermazeContext).toBe(true);
+    expect(bridge.activeMarkdownPath).toBe(innermaze.path);
     file = ordinary;
     metadataChanged?.(ordinary);
     expect(bridge.isInnermazeContext).toBe(false);
+    expect(bridge.activeMarkdownPath).toBe(ordinary.path);
     file = innermaze;
     metadataChanged?.(innermaze);
     expect(bridge.isInnermazeContext).toBe(true);

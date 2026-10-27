@@ -1,5 +1,7 @@
 import { describe, expect, it, afterEach } from "vitest";
+import { buildTrack } from "open-tts";
 import {
+  chunkIndexAtSourceOffset,
   exactReadingViewSourceRange,
   isMarkdownReadingView,
   readingViewSelection,
@@ -63,6 +65,38 @@ describe("Reading View playback source mapping", () => {
       start: 9,
       end: 28,
     });
+  });
+
+  it("starts from a containing sentence without changing whole-note audio chunks", () => {
+    const text =
+      "The first sentence is long enough to stand by itself. " +
+      "The second sentence is also long enough to stand by itself. " +
+      "The third sentence comes after both of the previous ones.";
+    const options = {
+      filename: "article.md",
+      sourcePath: "article.md",
+      text,
+      start: 0,
+      end: text.length,
+    };
+    const offset = text.indexOf("third sentence") + 5;
+    const chunks = buildTrack(options, "sentence").chunks;
+    const index = chunkIndexAtSourceOffset(options, "sentence", offset);
+    expect(index).toBeDefined();
+    expect(index).toBeGreaterThan(0);
+    expect(chunks[index!].start).toBeLessThanOrEqual(offset);
+    expect(chunks[index!].end).toBeGreaterThan(offset);
+    expect(chunks[index!].rawText).toContain("third sentence");
+  });
+
+  it("rejects positions outside the source, including EOF", () => {
+    const text = "There is something here to read.";
+    const options = { filename: "a.md", text, start: 0, end: text.length };
+    expect(chunkIndexAtSourceOffset(options, "sentence", -1)).toBeUndefined();
+    expect(
+      chunkIndexAtSourceOffset(options, "sentence", text.length),
+    ).toBeUndefined();
+    expect(chunkIndexAtSourceOffset(options, "sentence", 1.2)).toBeUndefined();
   });
 
   it("refuses ambiguous and rendered-only selections as checkpoint offsets", () => {

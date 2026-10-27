@@ -8,7 +8,7 @@ import {
   type TTSPluginSettingsStore,
   createTTSActions,
 } from "open-tts";
-import type { ObsidianBridge } from "../ObsidianBridge";
+import type { ObsidianBridge, ReadingSelectionAnchor } from "../ObsidianBridge";
 import { ObsidianTooltipProvider } from "../util/ObsidianTooltipService";
 import { TTSControlMenuContent } from "./TTSControlMenu";
 
@@ -75,6 +75,12 @@ export const GlobalMobilePlayer = observer(
     bridge: ObsidianBridge;
   }): React.ReactElement | null => {
     const [menuOpen, setMenuOpen] = React.useState(false);
+    const [readingSelection, setReadingSelection] = React.useState<
+      ReadingSelectionAnchor | undefined
+    >(undefined);
+    const pointerSelection = React.useRef<ReadingSelectionAnchor | undefined>(
+      undefined,
+    );
     const actions = React.useMemo(
       () => createTTSActions(player, settings, bridge),
       [player, settings, bridge],
@@ -96,6 +102,13 @@ export const GlobalMobilePlayer = observer(
       if (!visible) setMenuOpen(false);
     }, [visible]);
 
+    // Never leave a previous article's menu or selection attached to a new one.
+    React.useEffect(() => {
+      setMenuOpen(false);
+      setReadingSelection(undefined);
+      pointerSelection.current = undefined;
+    }, [bridge.activeMarkdownPath]);
+
     React.useEffect(() => {
       if (!menuOpen) return;
       const onEscape = (event: KeyboardEvent): void => {
@@ -107,16 +120,29 @@ export const GlobalMobilePlayer = observer(
 
     if (!visible) return null;
 
-    const title = active?.audio.filename?.split("/").pop() ?? "Aloud";
+    const currentNotePath = hasNote ? bridge.activeMarkdownPath : null;
+    // A track from a different article is not the currently displayed article.
+    // Keep the old track/bookmark, but don't aim the dock's controls at it.
+    const showingAnotherArticle =
+      !!currentNotePath &&
+      !!active &&
+      active.audio.sourcePath !== currentNotePath;
+    const currentAudio = showingAnotherArticle ? null : active;
+    const title =
+      currentNotePath?.split("/").pop() ??
+      active?.audio.filename?.split("/").pop() ??
+      "Aloud";
     const progress =
-      active && active.position >= 0 && active.audio.chunks.length > 0
-        ? `${active.position + 1} / ${active.audio.chunks.length}`
+      currentAudio &&
+      currentAudio.position >= 0 &&
+      currentAudio.audio.chunks.length > 0
+        ? `${currentAudio.position + 1} / ${currentAudio.audio.chunks.length}`
         : hasNote
           ? "Current note"
           : bridge.hasSavedReading()
             ? "Saved reading"
             : "Ready";
-    const isPlaying = active?.isPlaying ?? false;
+    const isPlaying = currentAudio?.isPlaying ?? false;
 
     return (
       <>
@@ -137,6 +163,7 @@ export const GlobalMobilePlayer = observer(
                 player={player}
                 settings={settings}
                 bridge={bridge}
+                readingSelection={readingSelection}
                 onClose={() => setMenuOpen(false)}
               />
             </div>
@@ -157,7 +184,7 @@ export const GlobalMobilePlayer = observer(
             <DockButton
               icon="skip-back"
               label="Previous sentence"
-              disabled={!active}
+              disabled={!currentAudio}
               onClick={actions.previous}
             />
             <DockButton
@@ -165,7 +192,7 @@ export const GlobalMobilePlayer = observer(
               label={
                 isPlaying
                   ? "Pause Aloud"
-                  : active
+                  : currentAudio
                     ? "Resume Aloud"
                     : "Play current note"
               }
@@ -175,19 +202,31 @@ export const GlobalMobilePlayer = observer(
             <DockButton
               icon="skip-forward"
               label="Next sentence"
-              disabled={!active}
+              disabled={!currentAudio}
               onClick={actions.next}
             />
             <DockButton
               icon="locate-fixed"
               label="Jump to playing line"
-              disabled={!active?.currentChunk || !active.audio.sourcePath}
+              disabled={
+                !currentAudio?.currentChunk || !currentAudio.audio.sourcePath
+              }
               onClick={() => bridge.jumpToPlayingLine()}
             />
             <DockButton
               icon="ellipsis"
               label="More Aloud controls"
-              onClick={() => setMenuOpen((before) => !before)}
+              onPointerDown={() => {
+                // iOS may collapse the rendered text selection on button focus.
+                pointerSelection.current = bridge.captureReadingSelection();
+              }}
+              onClick={() => {
+                const captured =
+                  pointerSelection.current ?? bridge.captureReadingSelection();
+                pointerSelection.current = undefined;
+                setReadingSelection(menuOpen ? undefined : captured);
+                setMenuOpen((before) => !before);
+              }}
               expanded={menuOpen}
             />
           </div>
@@ -201,6 +240,7 @@ const DockButton: React.FC<{
   icon: string;
   label: string;
   onClick: () => void;
+  onPointerDown?: () => void;
   disabled?: boolean;
   primary?: boolean;
   expanded?: boolean;
@@ -208,6 +248,7 @@ const DockButton: React.FC<{
   icon,
   label,
   onClick,
+  onPointerDown,
   disabled = false,
   primary = false,
   expanded,
@@ -219,6 +260,7 @@ const DockButton: React.FC<{
     aria-expanded={expanded}
     aria-haspopup={expanded === undefined ? undefined : "menu"}
     disabled={disabled}
+    onPointerDown={onPointerDown}
     onClick={onClick}
   >
     <DockIcon icon={icon} />

@@ -3,6 +3,8 @@ import { TTSPluginSettingsStore } from "./TTSPluginSettings";
 
 export interface TTSPlaybackActionBridge {
   playSelection(): void;
+  /** Optional Obsidian context; the shared web player has no active file. */
+  activeMarkdownPath?: string | null;
 }
 
 /**
@@ -53,7 +55,13 @@ export function createTTSActions(
 
     playPause(): void {
       const active = player.activeText;
-      if (!active) {
+      // Obsidian retains an old audio session while the reader navigates.
+      // Play must begin the note on screen, not silently resume that session.
+      if (
+        !active ||
+        (bridge.activeMarkdownPath &&
+          active.audio?.sourcePath !== bridge.activeMarkdownPath)
+      ) {
         bridge.playSelection();
       } else if (active.isPlaying) {
         active.pause();

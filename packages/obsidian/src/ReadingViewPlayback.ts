@@ -1,4 +1,6 @@
 import type { MarkdownView } from "obsidian";
+import { buildTrack } from "open-tts";
+import type { AudioTextOptions } from "open-tts";
 
 /** Reading View renders text without an active CodeMirror selection. */
 export function isMarkdownReadingView(
@@ -43,4 +45,26 @@ export function exactReadingViewSourceRange(
   const start = source.indexOf(text);
   if (start < 0 || source.indexOf(text, start + 1) >= 0) return undefined;
   return { text, start, end: start + text.length };
+}
+
+/**
+ * Seek within the unchanged full-document chunk sequence. Using a suffix as a
+ * new track would change cache keys and the saved-reading identity, whereas
+ * a resume chunk uses exactly the same audio chunks as normal playback.
+ * A selected character inside a chunk starts at that chunk's beginning.
+ */
+export function chunkIndexAtSourceOffset(
+  options: AudioTextOptions,
+  chunkType: "sentence" | "paragraph",
+  offset: number,
+): number | undefined {
+  if (
+    !Number.isSafeInteger(offset) ||
+    offset < options.start ||
+    offset >= options.end
+  )
+    return undefined;
+  const chunks = buildTrack(options, chunkType).chunks;
+  const index = chunks.findIndex((chunk) => chunk.end > offset);
+  return index < 0 ? undefined : index;
 }
