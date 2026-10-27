@@ -38,12 +38,87 @@ function phoneBridge() {
     ...createMockObsidianBridge(),
     isMobile: () => true,
     activeViewType: "markdown",
+    activeMarkdownPath: "Articles/Whose Leash.md",
     canPlayDetachedAudio: false,
     hasSavedReading: () => false,
   };
 }
 
 describe("global phone dock", () => {
+  it("treats an older session as another article after navigation", async () => {
+    const player = samplePlayer(true);
+    const bridge = { ...phoneBridge(), activeMarkdownPath: "Articles/New.md" };
+    const settings = await createTestSettingsStore();
+    const original = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 390,
+    });
+    try {
+      render(
+        <GlobalMobilePlayer
+          player={player}
+          settings={settings}
+          bridge={bridge}
+        />,
+      );
+      expect(screen.getByText("New.md")).toBeTruthy();
+      expect(screen.getByText("Current note")).toBeTruthy();
+      expect(screen.queryByText("74 / 85")).toBeNull();
+      expect(
+        screen
+          .getByRole("button", { name: "Previous sentence" })
+          .hasAttribute("disabled"),
+      ).toBe(true);
+      fireEvent.click(
+        screen.getByRole("button", { name: "Play current note" }),
+      );
+      expect(bridge.playSelection).toHaveBeenCalledOnce();
+      expect(player.activeText?.play).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        value: original,
+      });
+    }
+  });
+  it("keeps the selected Reader phrase when tapping More collapses selection", async () => {
+    const player = samplePlayer(false);
+    const bridge = phoneBridge();
+    const anchor = {
+      sourcePath: "Article.md",
+      renderedText: "The particular sentence I selected",
+    };
+    bridge.captureReadingSelection.mockReturnValueOnce(anchor);
+    const settings = await createTestSettingsStore();
+    const previousWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 390,
+    });
+    try {
+      render(
+        <GlobalMobilePlayer
+          player={player}
+          settings={settings}
+          bridge={bridge}
+        />,
+      );
+      const more = screen.getByRole("button", { name: "More Aloud controls" });
+      fireEvent.pointerDown(more);
+      fireEvent.click(more);
+      fireEvent.click(
+        screen.getByRole("button", { name: "Play from here to end" }),
+      );
+      expect(bridge.playFromHere).toHaveBeenCalledWith(anchor);
+    } finally {
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        value: previousWidth,
+      });
+    }
+  });
+
   it("shows a play action on an idle Markdown note, without an editor", async () => {
     const player = samplePlayer(false);
     const bridge = phoneBridge();

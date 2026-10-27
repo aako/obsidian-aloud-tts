@@ -1092,6 +1092,27 @@ details[open] .tts-error-details {
   color: var(--text-accent);
 }
 
+/* ios.39 reader-first mobile mode: protect the accidental Edit toggle.
+   Use Obsidian's command palette > Toggle reading view for rare edits.
+   The view switcher may advertise either Edit or Current view by version. */
+body.is-mobile
+  .workspace-leaf-content[data-type="markdown"]:has(.markdown-preview-view)
+  .view-header
+  .view-actions
+  .view-action[aria-label^="Current view"],
+body.is-mobile
+  .workspace-leaf-content[data-type="markdown"]:has(.markdown-preview-view)
+  .view-header
+  .view-actions
+  .view-action[aria-label^="Edit"],
+body.is-mobile
+  .workspace-leaf-content[data-type="markdown"]:has(.markdown-preview-view)
+  .view-header
+  .view-actions
+  .view-action[aria-label^="Switch to editing"] {
+  display: none !important;
+}
+
 /* ios.27: Aloud menu action layout baseline, not gated by a breakpoint.
  * In some Obsidian mobile shells the CSS viewport is wider than the 640px
  * breakpoint even though the UI is a bottom sheet. Scope everything to our

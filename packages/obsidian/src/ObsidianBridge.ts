@@ -26,10 +26,17 @@ import { ArticleCacheModal } from "./components/ArticleCacheModal";
 import { selectCurrentArticleCacheJob } from "./components/ArticleCacheSelection";
 import { scrollToSpokenRange } from "./ReadingViewHighlight";
 import {
+  chunkIndexAtSourceOffset,
   exactReadingViewSourceRange,
   isMarkdownReadingView,
   readingViewSelection,
 } from "./ReadingViewPlayback";
+
+/** A selection snapshot bound to its original note, before the menu steals focus. */
+export interface ReadingSelectionAnchor {
+  sourcePath: string;
+  renderedText: string;
+}
 
 export interface ObsidianBridgeSpecifics {
   activeObsidianEditor: Editor | undefined;
@@ -41,6 +48,7 @@ export interface ObsidianBridge
   canPlayDetachedAudio: boolean;
   /** Observable active view kind; Reader/Editor Markdown both report markdown. */
   activeViewType?: string | null;
+  activeMarkdownPath?: string | null;
   /** This note belongs to Innermaze, so Aloud must not render controls. */
   isInnermazeContext?: boolean;
   /** Installed plugin manifest version, identical on all plugin interfaces. */
@@ -53,6 +61,8 @@ export interface ObsidianBridge
   ) => void;
   playDetached: (text: string, filename?: string) => void;
   playSelection: () => void;
+  captureReadingSelection(): ReadingSelectionAnchor | undefined;
+  playFromHere(anchor?: ReadingSelectionAnchor): Promise<void>;
   playDocument(): Promise<void>;
   openArticleCache(
     scope?: "document" | "selection" | "saved" | "manage",
@@ -115,6 +125,8 @@ export class ObsidianBridgeImpl implements ObsidianBridge {
 
   isDetachedAudio: boolean = false;
   activeViewType: string | null = null;
+  /** Active Markdown file; reactive even when another Markdown file was open. */
+  activeMarkdownPath: string | null = null;
   isInnermazeContext = false;
   private _playingIconRoot: Root | null = null;
   get detachedAudio(): boolean {
@@ -149,6 +161,7 @@ export class ObsidianBridgeImpl implements ObsidianBridge {
       activeEditor: mobx.computed,
       activeObsidianEditor: mobx.observable.ref,
       activeViewType: mobx.observable,
+      activeMarkdownPath: mobx.observable,
       isInnermazeContext: mobx.observable,
       canPlayDetachedAudio: mobx.computed,
       detachedAudio: mobx.computed,
@@ -399,6 +412,7 @@ export class ObsidianBridgeImpl implements ObsidianBridge {
       this.app.workspace.activeLeaf?.view.getViewType() || null;
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
     const file = view?.file;
+    this.activeMarkdownPath = file?.path ?? null;
     const frontmatter = file
       ? this.app.metadataCache?.getFileCache(file)?.frontmatter
       : undefined;
@@ -693,6 +707,93 @@ export class ObsidianBridgeImpl implements ObsidianBridge {
       this.triggerSelection(focused.file, focused.editor);
     } else {
       new Notice("Focus a file or select some text first to play");
+    }
+  }
+
+  /** Capture the preview selection before a mobile drawer can collapse it. */
+  captureReadingSelection(): ReadingSelectionAnchor | undefined {
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (!isMarkdownReadingView(view) || !view.file) return undefined;
+    const selected = readingViewSelection(
+      view.containerEl,
+      (typeof activeWindow !== "undefined"
+        ? activeWindow
+        : window
+      ).getSelection(),
+    );
+    return selected
+      ? { sourcePath: view.file.path, renderedText: selected }
+      : undefined;
+  }
+
+  /** Continue through the note from the selected sentence group or editor cursor. */
+  async playFromHere(anchor?: ReadingSelectionAnchor): Promise<void> {
+    if (this.readingActionPending) return;
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (!view?.file || this.isInnermazeContext) {
+      new Notice("Open an ordinary Markdown note to play from a line.");
+      return;
+    }
+    const file = view.file;
+    const preview = view.getMode() === "preview";
+    const captured =
+      anchor?.sourcePath === file.path
+        ? anchor
+        : this.captureReadingSelection();
+    if (preview && !captured?.renderedText) {
+      new Notice(
+        "Select words in Reading View before choosing Play from here.",
+      );
+      return;
+    }
+
+    this.readingActionPending = true;
+    try {
+      const source = preview
+        ? await this.app.vault.read(file)
+        : view.editor.getValue();
+      const offset = preview
+        ? exactReadingViewSourceRange(source, captured!.renderedText)?.start
+        : view.editor.posToOffset(view.editor.getCursor("from"));
+      if (offset == null) {
+        new Notice(
+          "Selected text must appear uniquely and exactly in the note. Try selecting a shorter, plain-text phrase.",
+        );
+        return;
+      }
+      const options: AudioTextOptions = {
+        filename: file.path,
+        sourcePath: file.path,
+        text: source,
+        start: 0,
+        end: source.length,
+      };
+      const index = chunkIndexAtSourceOffset(
+        options,
+        this.settings.settings.chunkType,
+        offset,
+      );
+      if (index == null) {
+        new Notice("No speakable text remains at the selected location.");
+        return;
+      }
+      if (
+        this.app.workspace.getActiveViewOfType(MarkdownView)?.file?.path !==
+        file.path
+      ) {
+        new Notice(
+          "The active note changed. Select your starting point again.",
+        );
+        return;
+      }
+      // The same source identity, full-document chunk boundaries and cache keys.
+      // Never resume from a previous bookmark: the explicit selection wins.
+      await this.playSavedReading({ ...options, resumeChunkIndex: index });
+    } catch (error) {
+      console.warn("Aloud: Play from here failed", error);
+      new Notice("Couldn't start playback from the selected location.");
+    } finally {
+      this.readingActionPending = false;
     }
   }
 

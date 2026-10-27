@@ -68,6 +68,33 @@ describe("TTSActions", () => {
   });
 
   describe("playPause", () => {
+    it("starts the newly opened article instead of resuming the previous article", () => {
+      const play = vi.fn();
+      bridge.activeMarkdownPath = "Articles/New.md";
+      player.activeText = {
+        audio: { sourcePath: "Articles/Old.md" },
+        isPlaying: false,
+        pause: vi.fn(),
+        play,
+      } as unknown as AudioStore["activeText"];
+      actions.playPause();
+      expect(bridge.playSelection).toHaveBeenCalledOnce();
+      expect(play).not.toHaveBeenCalled();
+    });
+
+    it("resumes the session if it belongs to the currently open article", () => {
+      const play = vi.fn();
+      bridge.activeMarkdownPath = "Articles/New.md";
+      player.activeText = {
+        audio: { sourcePath: "Articles/New.md" },
+        isPlaying: false,
+        pause: vi.fn(),
+        play,
+      } as unknown as AudioStore["activeText"];
+      actions.playPause();
+      expect(play).toHaveBeenCalledOnce();
+      expect(bridge.playSelection).not.toHaveBeenCalled();
+    });
     it("should call playSelection when no active text", () => {
       actions.playPause();
       expect(bridge.playSelection).toHaveBeenCalled();

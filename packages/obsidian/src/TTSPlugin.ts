@@ -228,7 +228,11 @@ export default class TTSPlugin extends Plugin {
         if (checking) {
           return true;
         }
-        if (!active) {
+        if (
+          !active ||
+          (this.bridge.activeMarkdownPath &&
+            active.audio.sourcePath !== this.bridge.activeMarkdownPath)
+        ) {
           this.bridge.playSelection();
         } else if (this.player.activeText?.isPlaying) {
           this.player.activeText?.pause();

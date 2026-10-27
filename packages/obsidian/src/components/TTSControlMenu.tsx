@@ -4,7 +4,7 @@ import { setIcon } from "obsidian";
 import { TTSActions } from "open-tts";
 import { AudioStore } from "open-tts";
 import { TTSPluginSettingsStore } from "open-tts";
-import type { ObsidianBridge } from "../ObsidianBridge";
+import type { ObsidianBridge, ReadingSelectionAnchor } from "../ObsidianBridge";
 
 export interface TTSControlMenuProps {
   actions: TTSActions;
@@ -14,6 +14,7 @@ export interface TTSControlMenuProps {
   onClose: () => void;
   showRestartFromCursor?: boolean;
   showAutoscroll?: boolean;
+  readingSelection?: ReadingSelectionAnchor;
 }
 
 const MIN_SPEED = 0.5;
@@ -34,8 +35,13 @@ export const TTSControlMenuContent = observer(
     onClose,
     showRestartFromCursor = true,
     showAutoscroll = true,
+    readingSelection,
   }: TTSControlMenuProps): React.ReactElement => {
-    const active = player.activeText;
+    const active =
+      bridge?.activeMarkdownPath &&
+      player.activeText?.audio.sourcePath !== bridge.activeMarkdownPath
+        ? null
+        : player.activeText;
     const isPlaying = active?.isPlaying ?? false;
     const speed = settings.settings.playbackSpeed;
 
@@ -127,6 +133,18 @@ export const TTSControlMenuContent = observer(
               >
                 Play Selection / From Cursor
               </button>
+              {bridge && (
+                <button
+                  type="button"
+                  className="menu-item tappable"
+                  onClick={() => {
+                    onClose();
+                    void bridge.playFromHere(readingSelection);
+                  }}
+                >
+                  Play from here to end
+                </button>
+              )}
               {bridge && (
                 <button
                   type="button"
