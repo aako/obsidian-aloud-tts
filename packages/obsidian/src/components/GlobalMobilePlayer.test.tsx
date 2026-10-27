@@ -113,6 +113,7 @@ describe("global phone dock", () => {
       );
       expect(screen.getByLabelText("Aloud playback menu")).toBeTruthy();
       expect(screen.getByText("Manage Article Cache")).toBeTruthy();
+      expect(screen.getByText("Copy playback diagnostics")).toBeTruthy();
       fireEvent.click(screen.getByRole("button", { name: "Close Aloud menu" }));
       expect(screen.queryByLabelText("Aloud playback menu")).toBeNull();
     } finally {

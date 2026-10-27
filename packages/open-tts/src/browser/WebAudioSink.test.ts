@@ -279,6 +279,68 @@ describe("HTML audio rejection recovery", () => {
     sink.destroy();
   });
 
+  it("retains only sanitized media diagnostics and a bounded event history", () => {
+    const element = document.createElement("audio");
+    vi.spyOn(element, "pause").mockImplementation(() => undefined);
+    vi.spyOn(element, "load").mockImplementation(() => undefined);
+    const sink = new WebAudioSink(element, {
+      updating: false,
+      buffered: { length: 1, start: () => 0, end: () => 12 },
+    } as unknown as SourceBuffer);
+    element.currentTime = 4;
+    for (let index = 0; index < 60; index++) {
+      element.dispatchEvent(new Event("waiting"));
+    }
+    const report = sink.getPlaybackDiagnostics() as {
+      schema: string;
+      state: { currentTime: number; buffered: Array<{ end: number }> };
+      events: Array<{ event: string }>;
+    };
+    expect(report.schema).toBe("aloud-playback-v1");
+    expect(report.state.currentTime).toBe(4);
+    expect(report.state.buffered[0].end).toBe(12);
+    expect(report.events).toHaveLength(40);
+    expect(JSON.stringify(report)).not.toMatch(
+      /apiKey|sourcePath|articleText|transcript/,
+    );
+    sink.destroy();
+  });
+
+  it("times out a native SourceBuffer operation and preserves the media clock", async () => {
+    vi.useFakeTimers();
+    try {
+      const element = document.createElement("audio");
+      vi.spyOn(element, "pause").mockImplementation(() => undefined);
+      vi.spyOn(element, "load").mockImplementation(() => undefined);
+      const source = Object.assign(new EventTarget(), {
+        updating: false,
+        buffered: { length: 0 },
+        appendBuffer: vi.fn(() => {
+          source.updating = true;
+        }),
+      });
+      const sink = new WebAudioSink(element, source as unknown as SourceBuffer);
+      element.currentTime = 7;
+      const failure = vi.fn();
+      sink.onPlaybackFailure = failure;
+      const pending = expect(
+        sink.appendMedia(new ArrayBuffer(1)),
+      ).rejects.toThrow("MediaSource buffer update timed out.");
+      await vi.advanceTimersByTimeAsync(31000);
+      await pending;
+      expect(failure).toHaveBeenCalledOnce();
+      expect(element.currentTime).toBe(7);
+      expect(
+        (
+          sink.getPlaybackDiagnostics() as { events: Array<{ event: string }> }
+        ).events.some((event) => event.event === "buffer-operation-failed"),
+      ).toBe(true);
+      sink.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("observes rejected play promises and reports an error without throwing", async () => {
     const element = document.createElement("audio");
     vi.spyOn(element, "play").mockRejectedValue(
