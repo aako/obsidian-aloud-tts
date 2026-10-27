@@ -28,6 +28,7 @@ import { scrollToSpokenRange } from "./ReadingViewHighlight";
 import {
   chunkIndexAtSourceOffset,
   exactReadingViewSourceRange,
+  sourceLineForPlayingChunk,
   isMarkdownReadingView,
   readingViewSelection,
 } from "./ReadingViewPlayback";
@@ -560,17 +561,34 @@ export class ObsidianBridgeImpl implements ObsidianBridge {
       return false;
     }
     if (view.getMode() === "preview") {
-      const preview = view.containerEl.querySelector(".markdown-preview-view");
-      if (
-        !(preview instanceof HTMLElement) ||
-        !scrollToSpokenRange(preview, chunk.text)
-      ) {
+      // Obsidian virtualizes distant Reader sections. A DOM-only text search
+      // cannot find chunk 171 when the visible page starts at chunk 1. Ask the
+      // native Markdown renderer to reveal the source line; it handles deferred
+      // rendering without editing or replacing the active reading.
+      const source = view.getViewData();
+      const line = sourceLineForPlayingChunk(source, chunk);
+      if (line === undefined) {
         new Notice(
-          "The spoken line cannot be located uniquely in Reading View.",
+          "The article changed; the spoken position cannot be verified.",
         );
         return false;
       }
-      return true;
+      try {
+        view.setEphemeralState({ line });
+        return true;
+      } catch {
+        // Preserve the prior rendered-text fallback for older Obsidian builds.
+        const preview = view.containerEl.querySelector(
+          ".markdown-preview-view",
+        );
+        if (
+          preview instanceof HTMLElement &&
+          scrollToSpokenRange(preview, chunk.text)
+        )
+          return true;
+        new Notice("Couldn't scroll to the spoken line in Reading View.");
+        return false;
+      }
     }
     const editor = view.editor;
     const text = editor.getValue();

@@ -5,6 +5,7 @@ import {
   exactReadingViewSourceRange,
   isMarkdownReadingView,
   readingViewSelection,
+  sourceLineForPlayingChunk,
 } from "./ReadingViewPlayback";
 
 const root = document.createElement("div");
@@ -87,6 +88,41 @@ describe("Reading View playback source mapping", () => {
     expect(chunks[index!].start).toBeLessThanOrEqual(offset);
     expect(chunks[index!].end).toBeGreaterThan(offset);
     expect(chunks[index!].rawText).toContain("third sentence");
+  });
+
+  it("maps an offscreen audio chunk to the original Markdown line", () => {
+    const source =
+      "# Article\n\nFirst sentence.\n\nSecond sentence.\n\nThird sentence.";
+    const start = source.indexOf("Third sentence.");
+    expect(
+      sourceLineForPlayingChunk(source, {
+        start,
+        end: start + "Third sentence.".length,
+        rawText: "Third sentence.",
+      }),
+    ).toBe(6);
+  });
+
+  it("refuses to navigate by offsets when the note was edited or truncated", () => {
+    const source = "# Heading\n\nOriginal sentence.";
+    const chunk = {
+      start: source.indexOf("Original"),
+      end: source.length,
+      rawText: "Original sentence.",
+    };
+    expect(sourceLineForPlayingChunk(source, chunk)).toBe(2);
+    expect(
+      sourceLineForPlayingChunk(source.replace("Original", "Changed!"), chunk),
+    ).toBeUndefined();
+    expect(
+      sourceLineForPlayingChunk(source.slice(0, -3), chunk),
+    ).toBeUndefined();
+    expect(
+      sourceLineForPlayingChunk(source, { ...chunk, start: -1 }),
+    ).toBeUndefined();
+    expect(
+      sourceLineForPlayingChunk(source, { ...chunk, end: chunk.end + 1 }),
+    ).toBeUndefined();
   });
 
   it("rejects positions outside the source, including EOF", () => {
