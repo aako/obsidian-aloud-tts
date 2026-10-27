@@ -6,6 +6,14 @@ import type { AudioStore } from "open-tts";
 type TextAddress = { node: Text; offset: number };
 type IndexedText = { text: string; starts: TextAddress[]; ends: TextAddress[] };
 
+/** Obsidian/Markdown rendering may smarten punctuation without changing the speech. */
+function comparableChar(char: string): string {
+  if (char === "\u2018" || char === "\u2019") return "'";
+  if (char === "\u201c" || char === "\u201d") return '"';
+  if (char === "\u00a0" || char === "\u202f") return " ";
+  return char;
+}
+
 function normalizedBlockText(block: Element): IndexedText {
   const starts: TextAddress[] = [];
   const ends: TextAddress[] = [];
@@ -15,12 +23,12 @@ function normalizedBlockText(block: Element): IndexedText {
     const node = walker.currentNode as Text;
     if (
       node.parentElement?.closest(
-        "script, style, code, pre, .internal-embed, .markdown-embed, .footnote-ref, .aloud-reading-highlight",
+        "script, style, code, pre, .internal-embed, .markdown-embed, .footnote-ref, .heading-collapse-indicator, .collapse-indicator, .aloud-reading-highlight, [aria-hidden='true']",
       )
     )
       continue;
     for (let i = 0; i < node.data.length; i++) {
-      const char = node.data[i];
+      const char = comparableChar(node.data[i]);
       if (/\s/.test(char)) {
         if (text.endsWith(" ")) {
           ends[ends.length - 1] = { node, offset: i + 1 };
@@ -38,7 +46,88 @@ function normalizedBlockText(block: Element): IndexedText {
 }
 
 function normalizeSpoken(value: string): string {
-  return value.replace(/\s+/g, " ").trim();
+  return Array.from(value, comparableChar).join("").replace(/\s+/g, " ").trim();
+}
+
+/** Index all visible prose, not just one paragraph: audio chunks may span headings
+ * and adjacent paragraphs. Synthetic spaces represent block boundaries, but
+ * range endpoints always refer to real DOM text nodes. No DOM is modified. */
+function indexedPreviewText(preview: HTMLElement): IndexedText {
+  const textParts: string[] = [];
+  const starts: TextAddress[] = [];
+  const ends: TextAddress[] = [];
+  const selector = "p, h1, h2, h3, h4, h5, h6, li, td, th, blockquote";
+  const blocks = Array.from(preview.querySelectorAll(selector)).filter(
+    (block) =>
+      !block.querySelector(selector) &&
+      !block.closest(".internal-embed, .markdown-embed, [aria-hidden='true']"),
+  );
+  let lastWasSpace = false;
+  for (const block of blocks) {
+    const indexed = normalizedBlockText(block);
+    if (!indexed.text.trim()) continue;
+    if (ends.length && !lastWasSpace && indexed.text[0] !== " ") {
+      textParts.push(" ");
+      starts.push(ends[ends.length - 1]);
+      ends.push(indexed.starts[0]);
+      lastWasSpace = true;
+    }
+    for (let i = 0; i < indexed.text.length; i++) {
+      const char = indexed.text[i];
+      if (char === " " && lastWasSpace) {
+        // Collapse whitespace across inline nodes and rendered block boundaries.
+        ends[ends.length - 1] = indexed.ends[i];
+        continue;
+      }
+      textParts.push(char);
+      starts.push(indexed.starts[i]);
+      ends.push(indexed.ends[i]);
+      lastWasSpace = char === " ";
+    }
+  }
+  return { text: textParts.join(""), starts, ends };
+}
+
+/** Multiple occurrences are deliberately ambiguous, even if one is nearby. */
+function uniqueRenderedRange(
+  indexed: IndexedText,
+  target: string,
+): Range | null {
+  if (!target) return null;
+  const { text, starts, ends } = indexed;
+  let found = -1;
+  let at = text.indexOf(target);
+  while (at >= 0) {
+    const left = at === 0 || !/\w/.test(text[at - 1]);
+    const after = at + target.length;
+    const right = after === text.length || !/\w/.test(text[after]);
+    if (left && right) {
+      if (found >= 0) return null;
+      found = at;
+    }
+    at = text.indexOf(target, at + 1);
+  }
+  if (found < 0) return null;
+  const range = document.createRange();
+  range.setStart(starts[found].node, starts[found].offset);
+  const end = ends[found + target.length - 1];
+  range.setEnd(end.node, end.offset);
+  return range;
+}
+
+/** Do not override an ambiguous exact match with a shorter anchor. */
+function countRenderedMatches(text: string, target: string): number {
+  let count = 0;
+  let index = text.indexOf(target);
+  while (index >= 0) {
+    const left = index === 0 || !/\w/.test(text[index - 1]);
+    const end = index + target.length;
+    const right = end === text.length || !/\w/.test(text[end]);
+    if (left && right) count++;
+    if (count > 1) return count;
+    index = text.indexOf(target, index + 1);
+  }
+  return count;
 }
 
 /**
@@ -52,32 +141,26 @@ export function findReadingHighlightRange(
 ): Range | null {
   const target = normalizeSpoken(spokenText);
   if (target.length < 5 || target.length > 8000) return null;
+  const indexed = indexedPreviewText(preview);
+  const count = countRenderedMatches(indexed.text, target);
+  if (count > 1) return null;
+  if (count === 1) return uniqueRenderedRange(indexed, target);
 
-  const blocks = Array.from(
-    preview.querySelectorAll("p, h1, h2, h3, h4, h5, h6, li, td, th"),
-  ).filter(
-    (block) => !block.querySelector("p, h1, h2, h3, h4, h5, h6, li, td, th"),
-  );
-  const matches: Range[] = [];
-  for (const block of blocks) {
-    const { text, starts, ends } = normalizedBlockText(block);
-    let offset = text.indexOf(target);
-    while (offset >= 0) {
-      // A substring inside another word should never be highlighted.
-      const left = offset === 0 || !/\w/.test(text[offset - 1]);
-      const after = offset + target.length;
-      const right = after === text.length || !/\w/.test(text[after]);
-      if (left && right) {
-        const range = document.createRange();
-        range.setStart(starts[offset].node, starts[offset].offset);
-        range.setEnd(ends[after - 1].node, ends[after - 1].offset);
-        matches.push(range);
-        if (matches.length > 1) return null;
-      }
-      offset = text.indexOf(target, offset + 1);
-    }
+  // Rendered Markdown can differ from cleanMarkup's spoken text (link URLs,
+  // punctuation, footnotes, or chunks crossing blocks). Locate only a LONG,
+  // uniquely occurring opening phrase; never guess from a few common words.
+  // The shorter painted range is intentional: it is verifiably present.
+  const words = target.split(" ").filter(Boolean);
+  if (words.length < 10 || target.length < 70) return null;
+  const prefix: string[] = [];
+  for (const word of words) {
+    prefix.push(word);
+    if (prefix.length >= 12 && prefix.join(" ").length >= 70) break;
+    if (prefix.length >= 20) break;
   }
-  return matches.length === 1 ? matches[0] : null;
+  const anchor = prefix.join(" ");
+  if (anchor.length < 65) return null;
+  return uniqueRenderedRange(indexed, anchor);
 }
 
 /** Center the uniquely matched spoken range; never mutate rendered Markdown. */
