@@ -16,6 +16,7 @@ export class WebAudioSink implements AudioSink {
   private _objectUrl: string | undefined;
   _isPlaying = false;
   private readonly onAppForeground = (): void => {
+    this.recordPlaybackEvent("foreground");
     this.lastObservedMediaTime = undefined;
     this.lastMediaProgressAt = undefined;
     this.reconcileNativePlaybackState();
@@ -28,6 +29,59 @@ export class WebAudioSink implements AudioSink {
   private lastMediaProgressAt: number | undefined;
   private static readonly FOREGROUND_STALL_MS = 18000;
   private static readonly BUFFER_UNDERRUN_MS = 35000;
+  private readonly playbackHistory: Array<{
+    event: string;
+    at: string;
+    mediaTime: number | null;
+    paused: boolean;
+    hidden: boolean;
+  }> = [];
+
+  private recordPlaybackEvent(event: string): void {
+    const value = this._audio.currentTime;
+    this.playbackHistory.push({
+      event,
+      at: new Date().toISOString(),
+      mediaTime: Number.isFinite(value) ? Math.round(value * 100) / 100 : null,
+      paused: this._audio.paused,
+      hidden: document.hidden,
+    });
+    if (this.playbackHistory.length > 40) this.playbackHistory.shift();
+  }
+
+  /** Numeric media state only: no article text, vault paths, keys, or audio. */
+  getPlaybackDiagnostics(): unknown {
+    const ranges: Array<{ start: number; end: number }> = [];
+    try {
+      const buffered = this._sourceBuffer.buffered;
+      for (let index = 0; index < buffered.length; index++) {
+        ranges.push({ start: buffered.start(index), end: buffered.end(index) });
+      }
+    } catch {
+      // The SourceBuffer may have detached during a native media failure.
+    }
+    return {
+      schema: "aloud-playback-v1",
+      capturedAt: new Date().toISOString(),
+      state: {
+        isPlaying: this._isPlaying,
+        trackStatus: this._trackStatus,
+        stalled: this._isPlaybackStalled,
+        playPending: this.playPending,
+        currentTime: Number.isFinite(this._audio.currentTime)
+          ? this._audio.currentTime
+          : null,
+        paused: this._audio.paused,
+        seeking: this._audio.seeking,
+        readyState: this._audio.readyState,
+        networkState: this._audio.networkState,
+        hidden: document.hidden,
+        sourceBufferUpdating: this._sourceBuffer.updating,
+        buffered: ranges,
+      },
+      events: this.playbackHistory.slice(),
+    };
+  }
 
   /** A frozen native clock with playable audio must never advance a bookmark. */
   private readonly checkPlaybackHealth = (): void => {
@@ -70,6 +124,7 @@ export class WebAudioSink implements AudioSink {
       ? WebAudioSink.FOREGROUND_STALL_MS
       : WebAudioSink.BUFFER_UNDERRUN_MS;
     if (now - this.lastMediaProgressAt < limit) return;
+    this.recordPlaybackEvent("watchdog-timeout");
     this.pause();
     this.onPlaybackFailure?.(
       new Error("Aloud stopped after a prolonged native audio stall."),
@@ -281,7 +336,12 @@ export class WebAudioSink implements AudioSink {
   }
 
   switchMedia(data: ArrayBuffer): Promise<void> {
-    return this.enqueueMedia(() => this.switchMediaNow(data));
+    return this.enqueueMedia(() => this.switchMediaNow(data)).catch(
+      (error: unknown) => {
+        this.handleMediaBufferFailure();
+        throw error;
+      },
+    );
   }
 
   private async switchMediaNow(data: ArrayBuffer): Promise<void> {
@@ -303,7 +363,22 @@ export class WebAudioSink implements AudioSink {
   }
 
   appendMedia(data: ArrayBuffer): Promise<void> {
-    return this.enqueueMedia(() => this.appendMediaNow(data));
+    return this.enqueueMedia(() => this.appendMediaNow(data)).catch(
+      (error: unknown) => {
+        this.handleMediaBufferFailure();
+        throw error;
+      },
+    );
+  }
+
+  private handleMediaBufferFailure(): void {
+    this.recordPlaybackEvent("buffer-operation-failed");
+    this.pause();
+    this.onPlaybackFailure?.(
+      new Error(
+        "Aloud native audio buffering failed; the spoken position was preserved.",
+      ),
+    );
   }
 
   private async appendMediaNow(data: ArrayBuffer): Promise<void> {
@@ -445,6 +520,7 @@ export class WebAudioSink implements AudioSink {
   }
 
   _onplay = (): void => {
+    this.recordPlaybackEvent("play");
     this.lastObservedMediaTime = undefined;
     this.lastMediaProgressAt = undefined;
     if (!this.playbackWatchdog) {
@@ -456,6 +532,7 @@ export class WebAudioSink implements AudioSink {
   };
 
   _onpause = (): void => {
+    this.recordPlaybackEvent("pause");
     if (this.playbackWatchdog) clearInterval(this.playbackWatchdog);
     this.playbackWatchdog = undefined;
     this.lastObservedMediaTime = undefined;
@@ -469,6 +546,7 @@ export class WebAudioSink implements AudioSink {
   };
 
   private _onMediaLifecycle = (event: Event): void => {
+    this.recordPlaybackEvent(event.type);
     if (
       (event.type === "waiting" || event.type === "stalled") &&
       this._isPlaying &&
@@ -504,6 +582,7 @@ export class WebAudioSink implements AudioSink {
   };
 
   _onseeked = (): void => {
+    this.recordPlaybackEvent("seeked");
     if (!this._sourceBuffer.buffered.length) {
       this._audio.currentTime = 0;
     } else if (
@@ -529,6 +608,7 @@ export class WebAudioSink implements AudioSink {
       }
     }
     if (!available) return false;
+    this.recordPlaybackEvent("retry-buffered");
     this.pause();
     this._audio.currentTime = seconds;
     this.play();
@@ -600,8 +680,37 @@ function once<S extends string>(
   });
 }
 
+/** Bounded native wait: WebKit can lose updateend after background suspension. */
 async function onceBuffUpdateEnd(sb: SourceBuffer): Promise<void> {
-  if (sb.updating) {
-    await once("updateend", sb);
-  }
+  if (!sb.updating) return;
+  await new Promise<void>((resolve, reject) => {
+    let finished = false;
+    const cleanup = (): void => {
+      sb.removeEventListener("updateend", onEnd);
+      sb.removeEventListener("abort", onAbort);
+      sb.removeEventListener("error", onError);
+      clearTimeout(timer);
+    };
+    const finish = (error?: Error): void => {
+      if (finished) return;
+      finished = true;
+      cleanup();
+      if (error) reject(error);
+      else resolve();
+    };
+    const onEnd = (): void => finish();
+    const onAbort = (): void =>
+      finish(new Error("MediaSource buffer update aborted."));
+    const onError = (): void =>
+      finish(new Error("MediaSource buffer update failed."));
+    sb.addEventListener("updateend", onEnd);
+    sb.addEventListener("abort", onAbort);
+    sb.addEventListener("error", onError);
+    const timer = setTimeout(
+      () => finish(new Error("MediaSource buffer update timed out.")),
+      30000,
+    );
+    // Close the race if native state completed while listeners were installed.
+    if (!sb.updating) finish();
+  });
 }

@@ -222,6 +222,21 @@ export const TTSControlMenuContent = observer(
 
           {bridge && (
             <div className="menu-group">
+              <button
+                className="menu-item tappable"
+                type="button"
+                onClick={() => {
+                  onClose();
+                  void bridge.copyPlaybackDiagnostics();
+                }}
+              >
+                <span className="menu-item-icon">
+                  <ObsidianIcon icon="clipboard-copy" />
+                </span>
+                <span className="menu-item-title">
+                  Copy playback diagnostics
+                </span>
+              </button>
               {showRestartFromCursor && (
                 <>
                   <button
