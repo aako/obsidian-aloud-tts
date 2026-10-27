@@ -68,3 +68,29 @@ export function chunkIndexAtSourceOffset(
   const index = chunks.findIndex((chunk) => chunk.end > offset);
   return index < 0 ? undefined : index;
 }
+
+/**
+ * The source offset stored with a played chunk survives Reading View's virtual
+ * rendering, unlike a DOM text lookup. Reject stale or edited source: a guessed
+ * line could take the reader to the wrong passage.
+ */
+export function sourceLineForPlayingChunk(
+  source: string,
+  chunk: { start: number; end: number; rawText: string },
+): number | undefined {
+  if (
+    !Number.isSafeInteger(chunk.start) ||
+    !Number.isSafeInteger(chunk.end) ||
+    chunk.start < 0 ||
+    chunk.end <= chunk.start ||
+    chunk.end > source.length ||
+    source.slice(chunk.start, chunk.end) !== chunk.rawText
+  )
+    return undefined;
+
+  let line = 0;
+  for (let index = 0; index < chunk.start; index++) {
+    if (source[index] === "\n") line++;
+  }
+  return line;
+}

@@ -72,6 +72,95 @@ vi.mock("obsidian", () => ({
 }));
 
 describe("ObsidianBridge", () => {
+  it("jumps by verified source line when distant Reader text is not rendered", async () => {
+    const text =
+      "# Head\n\nThe first sentence is sufficiently long for audio.\n\n" +
+      "The next paragraph is sufficiently long for another audio chunk.";
+    const file = Object.assign(new TFile(), { path: "Article.md" });
+    const containerEl = document.createElement("div");
+    containerEl.innerHTML =
+      '<div class="markdown-preview-view"><h1>Head</h1></div>';
+    const view = {
+      file,
+      containerEl,
+      getViewType: () => "markdown",
+      getMode: () => "preview",
+      getViewData: () => text,
+      setEphemeralState: vi.fn(),
+    };
+    const app = {
+      workspace: {
+        activeLeaf: { view },
+        on: vi.fn(),
+        off: vi.fn(),
+        getActiveViewOfType: vi.fn(() => view),
+      },
+    } as unknown as App;
+    const player = createTestAudioStore();
+    const bridge = new ObsidianBridgeImpl(
+      app,
+      player,
+      await createTestSettingsStore(),
+    );
+    const active = await player.startPlayer({
+      filename: file.path,
+      sourcePath: file.path,
+      text,
+      start: 0,
+      end: text.length,
+    });
+    const index = active.audio.chunks.findIndex((chunk) =>
+      chunk.rawText.includes("next paragraph"),
+    );
+    expect(index).toBeGreaterThanOrEqual(0);
+    active.setPosition(index);
+    const playing = active.currentChunk!;
+    const line = text.slice(0, playing.start).split("\n").length - 1;
+    expect(bridge.jumpToPlayingLine()).toBe(true);
+    expect(view.setEphemeralState).toHaveBeenCalledWith({ line });
+    expect(active.position).toBe(index);
+    bridge.destroy();
+    player.destroy();
+  });
+
+  it("does not scroll when the Reader Markdown differs from the playing track", async () => {
+    const text = "# Heading\n\nThis sentence belongs to the saved document.";
+    const file = Object.assign(new TFile(), { path: "Article.md" });
+    const view = {
+      file,
+      containerEl: document.createElement("div"),
+      getViewType: () => "markdown",
+      getMode: () => "preview",
+      getViewData: () => text.replace("saved", "edited"),
+      setEphemeralState: vi.fn(),
+    };
+    const app = {
+      workspace: {
+        activeLeaf: { view },
+        on: vi.fn(),
+        off: vi.fn(),
+        getActiveViewOfType: vi.fn(() => view),
+      },
+    } as unknown as App;
+    const player = createTestAudioStore();
+    const bridge = new ObsidianBridgeImpl(
+      app,
+      player,
+      await createTestSettingsStore(),
+    );
+    await player.startPlayer({
+      filename: file.path,
+      sourcePath: file.path,
+      text,
+      start: 0,
+      end: text.length,
+    });
+    expect(bridge.jumpToPlayingLine()).toBe(false);
+    expect(view.setEphemeralState).not.toHaveBeenCalled();
+    bridge.destroy();
+    player.destroy();
+  });
+
   it("starts the full saved note at the selected sentence instead of reading only the selection", async () => {
     const text =
       "The first sentence is sufficiently long to be its own chunk. " +
