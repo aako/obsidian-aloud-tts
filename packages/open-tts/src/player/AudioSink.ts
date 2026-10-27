@@ -28,6 +28,8 @@ export interface AudioSink {
   restart(): void;
   /** User-initiated replay from retained native audio, never synthesis. */
   retryBufferedAt?(seconds: number): boolean;
+  /** Sanitized native playback state, for a user-initiated diagnostic copy. */
+  getPlaybackDiagnostics?(): unknown;
   setRate(rate: number): void;
 
   clearMedia(): Promise<void>;
