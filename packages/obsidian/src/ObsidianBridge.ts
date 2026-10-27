@@ -64,6 +64,7 @@ export interface ObsidianBridge
   startOver(): Promise<void>;
   jumpToPlayingLine(): boolean;
   retryCurrentSentence(): boolean;
+  copyPlaybackDiagnostics(): Promise<boolean>;
   readingProgressLabel(): string | undefined;
 }
 
@@ -595,6 +596,33 @@ export class ObsidianBridgeImpl implements ObsidianBridge {
       return false;
     }
     return true;
+  }
+
+  async copyPlaybackDiagnostics(): Promise<boolean> {
+    const snapshot = this.playbackSink?.getPlaybackDiagnostics?.();
+    if (!snapshot) {
+      new Notice("Playback diagnostics are unavailable.");
+      return false;
+    }
+    try {
+      await navigator.clipboard.writeText(
+        JSON.stringify(
+          {
+            pluginVersion: this.version ?? "unknown",
+            playback: snapshot,
+          },
+          null,
+          2,
+        ),
+      );
+      new Notice(
+        "Aloud playback diagnostics copied (no article text or API keys).",
+      );
+      return true;
+    } catch {
+      new Notice("Unable to copy playback diagnostics from this device.");
+      return false;
+    }
   }
 
   async startOver(): Promise<void> {
