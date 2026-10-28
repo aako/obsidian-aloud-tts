@@ -1,10 +1,110 @@
 import { describe, expect, it, vi } from "vitest";
+import type { App, MarkdownView } from "obsidian";
+import type { AudioStore } from "open-tts";
 import {
   findReadingHighlightRange,
+  ReadingViewHighlight,
   scrollToSpokenRange,
 } from "./ReadingViewHighlight";
 
 describe("Reading View current sentence paint ranges", () => {
+  function readerHarness(
+    opts: { playing?: boolean; follow?: boolean; stale?: boolean } = {},
+  ) {
+    const text =
+      "# A long article\n\nAn opening paragraph is at the top.\n\n" +
+      "The spoken passage is much farther down the article.";
+    const start = text.indexOf("The spoken passage");
+    const chunk = {
+      text: "The spoken passage is much farther down the article.",
+      rawText: "The spoken passage is much farther down the article.",
+      start,
+      end: text.length,
+    };
+    const containerEl = document.createElement("div");
+    containerEl.innerHTML =
+      '<div class="markdown-preview-view"><p>An opening paragraph is at the top.</p></div>';
+    document.body.append(containerEl);
+    const view = {
+      file: { path: "Article.md" },
+      containerEl,
+      getMode: () => "preview",
+      getViewData: () =>
+        opts.stale ? text.replace("spoken passage", "changed passage") : text,
+      setEphemeralState: vi.fn(),
+    } as unknown as MarkdownView;
+    const app = {
+      workspace: {
+        getActiveViewOfType: vi.fn(() => view),
+        on: vi.fn(),
+        off: vi.fn(),
+      },
+    } as unknown as App;
+    const player = {
+      activeText: {
+        audio: { sourcePath: "Article.md" },
+        currentChunk: chunk,
+        position: 170,
+        isPlaying: opts.playing ?? true,
+      },
+      autoScrollEnabled: opts.follow ?? true,
+      disableAutoScroll: vi.fn(() => {
+        player.autoScrollEnabled = false;
+      }),
+      markProgrammaticScroll: vi.fn(),
+    } as unknown as AudioStore;
+    const highlight = new ReadingViewHighlight(app, player);
+    const paint = (): void => {
+      (highlight as unknown as { paint: () => void }).paint();
+    };
+    return { app, view, player, highlight, paint, containerEl };
+  }
+
+  it("automatically follows a distant spoken source line only once", () => {
+    const test = readerHarness();
+    try {
+      test.paint();
+      expect(test.view.setEphemeralState).toHaveBeenCalledWith({ line: 4 });
+      test.paint();
+      expect(test.view.setEphemeralState).toHaveBeenCalledTimes(1);
+      expect(test.player.markProgrammaticScroll).toHaveBeenCalledOnce();
+    } finally {
+      test.highlight.destroy();
+      test.containerEl.remove();
+    }
+  });
+
+  it("never auto-follows paused audio, disabled settings or stale source", () => {
+    for (const options of [
+      { playing: false },
+      { follow: false },
+      { stale: true },
+    ]) {
+      const test = readerHarness(options);
+      try {
+        test.paint();
+        expect(test.view.setEphemeralState).not.toHaveBeenCalled();
+      } finally {
+        test.highlight.destroy();
+        test.containerEl.remove();
+      }
+    }
+  });
+
+  it("suspends Reader auto-follow when the user scrolls by touch", () => {
+    const test = readerHarness();
+    try {
+      test.paint();
+      const preview = test.containerEl.querySelector(".markdown-preview-view")!;
+      preview.dispatchEvent(new Event("touchmove", { bubbles: true }));
+      expect(test.player.disableAutoScroll).toHaveBeenCalledOnce();
+      expect(test.player.autoScrollEnabled).toBe(false);
+    } finally {
+      test.highlight.destroy();
+      test.containerEl.remove();
+    }
+  });
+
   it("matches a sentence across emphasized inline text without altering HTML", () => {
     const root = document.createElement("div");
     root.innerHTML =
