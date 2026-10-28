@@ -1,6 +1,7 @@
 import * as mobx from "mobx";
 import { App, MarkdownView } from "obsidian";
 import type { AudioStore } from "open-tts";
+import { sourceLineForPlayingChunk } from "./ReadingViewPlayback";
 
 /** Lightweight source-independent text match: never rewrite Obsidian's rendered DOM. */
 type TextAddress = { node: Text; offset: number };
@@ -205,6 +206,33 @@ export class ReadingViewHighlight {
   private disposeReaction: () => void;
   private root: HTMLElement | null = null;
   private frame: number | null = null;
+  private readerPreview: HTMLElement | null = null;
+  private followedKey: string | null = null;
+  private followedLine: number | null = null;
+  private followedView: MarkdownView | null = null;
+
+  /** A deliberate finger/trackpad scroll suspends following until Auto scroll is re-enabled. */
+  private readonly onReaderGesture = (): void => {
+    if (!this.player.autoScrollEnabled) return;
+    this.player.disableAutoScroll();
+    this.followedKey = null;
+    this.followedLine = null;
+  };
+
+  private setReaderPreview(preview: HTMLElement | null): void {
+    if (this.readerPreview === preview) return;
+    this.readerPreview?.removeEventListener("touchmove", this.onReaderGesture);
+    this.readerPreview?.removeEventListener("wheel", this.onReaderGesture);
+    this.readerPreview = preview;
+    this.readerPreview?.addEventListener("touchmove", this.onReaderGesture, {
+      passive: true,
+    });
+    this.readerPreview?.addEventListener("wheel", this.onReaderGesture, {
+      passive: true,
+    });
+    this.followedKey = null;
+    this.followedLine = null;
+  }
 
   constructor(
     private readonly app: App,
@@ -217,6 +245,8 @@ export class ReadingViewHighlight {
           active?.audio.sourcePath,
           active?.currentChunk?.text,
           active?.position,
+          active?.isPlaying,
+          this.player.autoScrollEnabled,
         ];
       },
       () => this.schedule(),
@@ -263,18 +293,26 @@ export class ReadingViewHighlight {
       }
     }
     this.clear();
-    if (!view || view.getMode() !== "preview" || !view.file) return;
+    if (!view || view.getMode() !== "preview" || !view.file) {
+      this.setReaderPreview(null);
+      this.followedView = null;
+      return;
+    }
     const active = this.player.activeText;
     if (
       !active ||
       active.audio.sourcePath !== view.file.path ||
       !active.currentChunk
-    )
+    ) {
+      this.setReaderPreview(null);
+      this.followedView = null;
       return;
+    }
     const preview = container?.querySelector(".markdown-preview-view");
     if (!(preview instanceof HTMLElement)) return;
-    const range = findReadingHighlightRange(preview, active.currentChunk.text);
-    if (!range) return;
+    this.setReaderPreview(preview);
+    const chunk = active.currentChunk;
+    const range = findReadingHighlightRange(preview, chunk.text);
 
     const registry = this.registry();
     const HighlightCtor = (
@@ -282,11 +320,59 @@ export class ReadingViewHighlight {
         Highlight?: HighlightConstructor;
       }
     ).Highlight;
-    if (registry && HighlightCtor)
+    if (range && registry && HighlightCtor)
       registry.set(this.name, new HighlightCtor(range));
+
+    // Auto scroll already exists for CodeMirror, but Reading View needs native
+    // source-line navigation for unmounted/virtualized distant paragraphs.
+    // Never follow while paused, hidden, on a different note or after a manual
+    // scroll. The user can re-enable it using the existing Auto scroll control.
+    if (
+      !this.player.autoScrollEnabled ||
+      !active.isPlaying ||
+      document.hidden
+    ) {
+      this.followedKey = null;
+      return;
+    }
+    if (this.followedView !== view) {
+      this.followedView = view;
+      this.followedKey = null;
+      this.followedLine = null;
+    }
+    const key = `${view.file.path}:${active.position}:${chunk.start}`;
+    if (key === this.followedKey) return;
+    this.followedKey = key; // Idempotent across MutationObserver rerenders.
+
+    // Keep the viewport stationary while the spoken range is comfortably
+    // visible. Do not chase every sentence in a paragraph.
+    if (range && this.rangeIsComfortablyVisible(range, preview)) return;
+    const line = sourceLineForPlayingChunk(view.getViewData(), chunk);
+    if (line === undefined || line === this.followedLine) return;
+    try {
+      view.setEphemeralState({ line });
+      this.followedLine = line;
+      this.player.markProgrammaticScroll();
+    } catch {
+      // Unsupported preview scroll: preserve audio and let manual Jump handle it.
+    }
+  }
+
+  private rangeIsComfortablyVisible(
+    range: Range,
+    preview: HTMLElement,
+  ): boolean {
+    const rect = range.getBoundingClientRect();
+    const bounds = preview.getBoundingClientRect();
+    if (!rect.height || !bounds.height) return false;
+    const margin = Math.min(80, bounds.height * 0.18);
+    return (
+      rect.top >= bounds.top + margin && rect.top <= bounds.bottom - margin
+    );
   }
 
   destroy(): void {
+    this.setReaderPreview(null);
     this.disposeReaction();
     this.app.workspace.off("active-leaf-change", this.onLayout);
     this.app.workspace.off("layout-change", this.onLayout);
