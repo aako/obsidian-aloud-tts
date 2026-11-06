@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import * as React from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { AudioStore } from "open-tts";
+import type { App } from "obsidian";
 import {
   GlobalMobilePlayer,
   GlobalMobilePlayerHost,
@@ -45,6 +46,97 @@ function phoneBridge() {
 }
 
 describe("global phone dock", () => {
+  it("mounts above the active note and detaches for a file picker without stopping audio", async () => {
+    const player = samplePlayer(true);
+    const bridge = phoneBridge();
+    const settings = await createTestSettingsStore();
+    const noteRoot = document.createElement("div");
+    noteRoot.innerHTML =
+      '<div class="view-header"></div><div class="view-content"></div>';
+    document.body.append(noteRoot);
+    const view = {
+      file: { path: "Articles/Whose Leash.md" },
+      containerEl: noteRoot,
+      getViewType: () => "markdown",
+    };
+    const picker = { getViewType: () => "file-picker" };
+    const handlers = new Map<string, () => void>();
+    const activeLeaf: { view: typeof view | typeof picker } = { view };
+    const app = {
+      workspace: {
+        activeLeaf,
+        getActiveViewOfType: vi.fn(() =>
+          activeLeaf.view === view ? view : null,
+        ),
+        on: vi.fn((name: string, handler: () => void) => {
+          handlers.set(name, handler);
+          return {};
+        }),
+        off: vi.fn((name: string) => handlers.delete(name)),
+      },
+    };
+    const host = new GlobalMobilePlayerHost(
+      player,
+      settings,
+      bridge,
+      app as unknown as App,
+    );
+    const container = noteRoot.querySelector(".tts-global-mobile-host");
+    try {
+      expect(container).not.toBeNull();
+      expect(container?.nextElementSibling?.className).toBe("view-content");
+      expect(container?.parentElement).toBe(noteRoot);
+      expect(
+        document.body.querySelector(":scope > .tts-global-mobile-host"),
+      ).toBeNull();
+
+      activeLeaf.view = picker;
+      handlers.get("active-leaf-change")?.();
+      expect(container?.isConnected).toBe(false);
+      expect(player.activeText?.position).toBe(73);
+      expect(player.activeText?.pause).not.toHaveBeenCalled();
+
+      activeLeaf.view = view;
+      handlers.get("file-open")?.();
+      expect(container?.parentElement).toBe(noteRoot);
+      expect(container?.nextElementSibling?.className).toBe("view-content");
+    } finally {
+      host.destroy();
+      noteRoot.remove();
+    }
+    expect(handlers.size).toBe(0);
+  });
+
+  it("never shows the phone dock over a non-note view even with an active track", async () => {
+    const settings = await createTestSettingsStore();
+    const width = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 390,
+    });
+    try {
+      render(
+        <GlobalMobilePlayer
+          player={samplePlayer(true)}
+          settings={settings}
+          bridge={{
+            ...phoneBridge(),
+            activeViewType: "file-picker",
+            activeMarkdownPath: null,
+          }}
+        />,
+      );
+      expect(
+        screen.queryByRole("toolbar", { name: "Aloud player" }),
+      ).toBeNull();
+    } finally {
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        value: width,
+      });
+    }
+  });
+
   it("treats an older session as another article after navigation", async () => {
     const player = samplePlayer(true);
     const bridge = { ...phoneBridge(), activeMarkdownPath: "Articles/New.md" };
