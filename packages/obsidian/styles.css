@@ -1092,6 +1092,79 @@ details[open] .tts-error-details {
   color: var(--text-accent);
 }
 
+/* ios.43: mobile Aloud lives inside the active Markdown leaf, immediately
+ * above .view-content. The note's layout makes room for it; native file
+ * pickers and app menus can cover the note without competing with a body
+ * overlay. Desktop positioning is deliberately unchanged. */
+@media (max-width: 599px) {
+  .tts-global-mobile-host,
+  .tts-global-mobile-host.tts-player-top {
+    display: block;
+    position: relative;
+    top: auto;
+    right: auto;
+    bottom: auto;
+    left: auto;
+    flex: 0 0 auto;
+    box-sizing: border-box;
+    width: 100%;
+    margin: 0;
+    z-index: 2;
+    pointer-events: auto;
+  }
+
+  .tts-global-mobile-host .tts-global-mobile-dock,
+  .tts-global-mobile-host.tts-player-full .tts-global-mobile-dock {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding: 5px 8px;
+    border: 0;
+    border-bottom: 1px solid var(--background-modifier-border);
+    border-radius: 0;
+    background: var(--background-primary);
+    box-shadow: none;
+  }
+
+  .tts-global-mobile-host .tts-global-mobile-caption {
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    gap: 1px;
+    align-items: stretch;
+    justify-content: center;
+    min-width: 0;
+    padding: 0;
+    line-height: 1.15;
+  }
+
+  .tts-global-mobile-host .tts-global-mobile-buttons {
+    display: grid;
+    flex: none;
+    grid-template-columns: repeat(5, minmax(0, 40px));
+    gap: 3px;
+  }
+
+  .tts-global-mobile-host .tts-global-mobile-button {
+    width: 40px;
+    min-height: 44px;
+    padding: 4px;
+  }
+
+  .tts-global-mobile-host .menu.tts-global-mobile-menu,
+  .tts-global-mobile-host.tts-player-top .menu.tts-global-mobile-menu {
+    top: calc(
+      env(safe-area-inset-top, 0px) + var(--header-height, 48px) + 60px
+    );
+    bottom: auto;
+    max-height: min(65dvh, 580px);
+  }
+}
+
 /* ios.39 reader-first mobile mode: protect the accidental Edit toggle.
    Use Obsidian's command palette > Toggle reading view for rare edits.
    The view switcher may advertise either Edit or Current view by version. */

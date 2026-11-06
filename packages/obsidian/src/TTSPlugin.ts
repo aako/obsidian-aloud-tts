@@ -217,6 +217,7 @@ export default class TTSPlugin extends Plugin {
       this.player,
       this.settings,
       this.bridge,
+      this.app,
     );
 
     // this pause/resumes the current audio, or initiates a new audio if nothing is playing

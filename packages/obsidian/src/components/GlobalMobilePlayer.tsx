@@ -2,7 +2,8 @@ import * as React from "react";
 import { createRoot, type Root } from "react-dom/client";
 import * as mobx from "mobx";
 import { observer } from "mobx-react-lite";
-import { setIcon } from "obsidian";
+import { MarkdownView, setIcon } from "obsidian";
+import type { App } from "obsidian";
 import {
   type AudioStore,
   type TTSPluginSettingsStore,
@@ -12,24 +13,67 @@ import type { ObsidianBridge, ReadingSelectionAnchor } from "../ObsidianBridge";
 import { ObsidianTooltipProvider } from "../util/ObsidianTooltipService";
 import { TTSControlMenuContent } from "./TTSControlMenu";
 
-/** One host per plugin, attached to the application rather than CodeMirror. */
+/** On phones the player belongs to the active note, never to the app overlay. */
 export class GlobalMobilePlayerHost {
   private readonly container: HTMLElement;
   private readonly root: Root;
   private readonly stopLayoutReaction: () => void;
+  private readonly mobile: boolean;
+  private mountFrame: number | null = null;
+
+  private updateMobileMount(): void {
+    if (!this.mobile || !this.app) return;
+    const workspace = this.app.workspace;
+    const view = workspace.getActiveViewOfType(MarkdownView);
+    // Do not show above file pickers, settings or other active views; the
+    // existing track and its reading checkpoint remain entirely untouched.
+    if (
+      !view?.file ||
+      workspace.activeLeaf?.view !== view ||
+      view.getViewType() !== "markdown" ||
+      this.bridge.isInnermazeContext
+    ) {
+      this.container.remove();
+      return;
+    }
+    const content = view.containerEl.querySelector(".view-content");
+    if (!content?.parentElement) {
+      this.container.remove();
+      return;
+    }
+    // Insert immediately before the note content. It occupies layout space,
+    // unlike the old fixed body overlay, and stays above Reader scrolling.
+    if (
+      this.container.parentElement !== content.parentElement ||
+      this.container.nextElementSibling !== content
+    ) {
+      content.parentElement.insertBefore(this.container, content);
+    }
+  }
+
+  private readonly onWorkspaceChange = (): void => {
+    this.updateMobileMount();
+    if (this.mountFrame !== null) window.cancelAnimationFrame(this.mountFrame);
+    // Obsidian sometimes constructs .view-content after active-leaf-change.
+    this.mountFrame = window.requestAnimationFrame(() => {
+      this.mountFrame = null;
+      this.updateMobileMount();
+    });
+  };
 
   constructor(
     player: AudioStore,
     settings: TTSPluginSettingsStore,
-    bridge: ObsidianBridge,
+    private readonly bridge: ObsidianBridge,
+    private readonly app?: App,
   ) {
     this.container = document.createElement("div");
-    // The same AudioStore-backed dock serves iPhone and Mac. Keep the
-    // platform-specific position/size in CSS, not in a second player.
-    this.container.className = bridge.isMobile()
+    this.mobile = bridge.isMobile();
+    this.container.className = this.mobile
       ? "tts-global-mobile-host"
       : "tts-global-desktop-host";
-    document.body.appendChild(this.container);
+    // Desktop remains as before. Mobile never briefly flashes over dialogs.
+    if (!this.mobile) document.body.appendChild(this.container);
     this.stopLayoutReaction = mobx.reaction(
       () => [
         settings.settings.floatingPlayerPosition,
@@ -51,9 +95,22 @@ export class GlobalMobilePlayerHost {
         />
       </ObsidianTooltipProvider>,
     );
+    if (this.mobile && this.app) {
+      // Separate calls preserve Obsidian's strongly typed event overloads.
+      this.app.workspace.on("active-leaf-change", this.onWorkspaceChange);
+      this.app.workspace.on("file-open", this.onWorkspaceChange);
+      this.app.workspace.on("layout-change", this.onWorkspaceChange);
+      this.onWorkspaceChange();
+    }
   }
 
   destroy(): void {
+    if (this.mobile && this.app) {
+      this.app.workspace.off("active-leaf-change", this.onWorkspaceChange);
+      this.app.workspace.off("file-open", this.onWorkspaceChange);
+      this.app.workspace.off("layout-change", this.onWorkspaceChange);
+    }
+    if (this.mountFrame !== null) window.cancelAnimationFrame(this.mountFrame);
     this.stopLayoutReaction();
     this.root.unmount();
     this.container.remove();
@@ -90,13 +147,17 @@ export const GlobalMobilePlayer = observer(
     const isPhone = mobile && window.innerWidth < 600;
     const isMac = !mobile;
     const hasNote = bridge.activeViewType === "markdown";
+    // On iPhone the dock is note-specific, never a global floating player.
+    // Desktop deliberately retains its previous detached/PDF behavior.
     const visible =
       !bridge.isInnermazeContext &&
-      (isPhone || isMac) &&
-      (hasNote ||
-        !!active ||
-        bridge.hasSavedReading() ||
-        bridge.canPlayDetachedAudio);
+      (isPhone
+        ? hasNote && !!bridge.activeMarkdownPath
+        : isMac &&
+          (hasNote ||
+            !!active ||
+            bridge.hasSavedReading() ||
+            bridge.canPlayDetachedAudio));
 
     React.useEffect(() => {
       if (!visible) setMenuOpen(false);
