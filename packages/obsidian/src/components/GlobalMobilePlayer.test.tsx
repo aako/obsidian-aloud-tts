@@ -52,7 +52,7 @@ describe("global phone dock", () => {
     const settings = await createTestSettingsStore();
     const noteRoot = document.createElement("div");
     noteRoot.innerHTML =
-      '<div class="view-header"></div><div class="view-content"></div>';
+      '<div class="view-header"></div><div class="view-content"><div class="markdown-preview-view"><h1>Article</h1></div></div>';
     document.body.append(noteRoot);
     const view = {
       file: { path: "Articles/Whose Leash.md" },
@@ -82,10 +82,16 @@ describe("global phone dock", () => {
       app as unknown as App,
     );
     const container = noteRoot.querySelector(".tts-global-mobile-host");
+    const content = noteRoot.querySelector(".view-content");
     try {
       expect(container).not.toBeNull();
-      expect(container?.nextElementSibling?.className).toBe("view-content");
-      expect(container?.parentElement).toBe(noteRoot);
+      // The dock must be BELOW the view header/status inset, not its sibling.
+      expect(noteRoot.firstElementChild?.className).toBe("view-header");
+      expect(container?.parentElement).toBe(content);
+      expect(content?.firstElementChild).toBe(container);
+      expect(container?.nextElementSibling?.className).toBe(
+        "markdown-preview-view",
+      );
       expect(
         document.body.querySelector(":scope > .tts-global-mobile-host"),
       ).toBeNull();
@@ -98,8 +104,11 @@ describe("global phone dock", () => {
 
       activeLeaf.view = view;
       handlers.get("file-open")?.();
-      expect(container?.parentElement).toBe(noteRoot);
-      expect(container?.nextElementSibling?.className).toBe("view-content");
+      expect(container?.parentElement).toBe(content);
+      expect(content?.firstElementChild).toBe(container);
+      expect(container?.nextElementSibling?.className).toBe(
+        "markdown-preview-view",
+      );
     } finally {
       host.destroy();
       noteRoot.remove();
