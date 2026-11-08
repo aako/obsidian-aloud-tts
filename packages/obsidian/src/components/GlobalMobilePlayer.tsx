@@ -50,6 +50,35 @@ export class GlobalMobilePlayerHost {
     ) {
       content.insertBefore(this.container, content.firstChild);
     }
+    this.positionBelowMobileHeader(view);
+  }
+
+  /** Obsidian's phone header can float over the top of .view-content.
+   * Account for its actual screen geometry instead of trusting a safe-area
+   * inset or a hard-coded number of pixels. The margin stays within the note.
+   */
+  private positionBelowMobileHeader(view: MarkdownView): void {
+    // Measure the natural position, not last frame's added clearance.
+    this.container.style.marginTop = "0px";
+    const dockTop = this.container.getBoundingClientRect().top;
+    const header = view.containerEl.querySelector<HTMLElement>(".view-header");
+    const headerRect = header?.getBoundingClientRect();
+    const headerBottom =
+      headerRect && headerRect.height > 0 ? headerRect.bottom : 0;
+    const safeArea = Number.parseFloat(
+      window
+        .getComputedStyle(view.containerEl)
+        .getPropertyValue("--safe-area-inset-top"),
+    );
+    const obstructionBottom = Math.max(
+      headerBottom,
+      Number.isFinite(safeArea) ? safeArea : 0,
+    );
+    const gap =
+      obstructionBottom > dockTop
+        ? Math.ceil(obstructionBottom - dockTop + 8)
+        : 0;
+    this.container.style.marginTop = `${gap}px`;
   }
 
   private readonly onWorkspaceChange = (): void => {
@@ -101,6 +130,7 @@ export class GlobalMobilePlayerHost {
       this.app.workspace.on("active-leaf-change", this.onWorkspaceChange);
       this.app.workspace.on("file-open", this.onWorkspaceChange);
       this.app.workspace.on("layout-change", this.onWorkspaceChange);
+      window.addEventListener("resize", this.onWorkspaceChange);
       this.onWorkspaceChange();
     }
   }
@@ -110,6 +140,7 @@ export class GlobalMobilePlayerHost {
       this.app.workspace.off("active-leaf-change", this.onWorkspaceChange);
       this.app.workspace.off("file-open", this.onWorkspaceChange);
       this.app.workspace.off("layout-change", this.onWorkspaceChange);
+      window.removeEventListener("resize", this.onWorkspaceChange);
     }
     if (this.mountFrame !== null) window.cancelAnimationFrame(this.mountFrame);
     this.stopLayoutReaction();

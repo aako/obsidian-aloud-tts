@@ -46,6 +46,71 @@ function phoneBridge() {
 }
 
 describe("global phone dock", () => {
+  it("places the note dock below a floating phone header, not under the status bar", async () => {
+    const player = samplePlayer(true);
+    const settings = await createTestSettingsStore();
+    const noteRoot = document.createElement("div");
+    noteRoot.innerHTML =
+      '<div class="view-header"></div><div class="view-content"><div class="markdown-preview-view"></div></div>';
+    document.body.append(noteRoot);
+    const rectangle = (top: number, bottom: number): DOMRect =>
+      ({
+        top,
+        bottom,
+        height: bottom - top,
+        left: 0,
+        right: 390,
+        width: 390,
+        x: 0,
+        y: top,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    const header = noteRoot.querySelector<HTMLElement>(".view-header")!;
+    header.getBoundingClientRect = vi.fn(() => rectangle(75, 150));
+    const normalRect = HTMLElement.prototype.getBoundingClientRect;
+    const geometry = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLElement): DOMRect {
+        if (this.classList.contains("tts-global-mobile-host"))
+          return rectangle(0, 0);
+        return normalRect.call(this);
+      });
+    const view = {
+      file: { path: "Articles/Whose Leash.md" },
+      containerEl: noteRoot,
+      getViewType: () => "markdown",
+    };
+    const activeLeaf = { view };
+    const app = {
+      workspace: {
+        activeLeaf,
+        getActiveViewOfType: vi.fn(() => view),
+        on: vi.fn(),
+        off: vi.fn(),
+      },
+    };
+    let host: GlobalMobilePlayerHost | undefined;
+    try {
+      host = new GlobalMobilePlayerHost(
+        player,
+        settings,
+        phoneBridge(),
+        app as unknown as App,
+      );
+      const dock = noteRoot.querySelector<HTMLElement>(
+        ".tts-global-mobile-host",
+      );
+      expect(dock?.parentElement).toBe(noteRoot.querySelector(".view-content"));
+      expect(dock?.style.marginTop).toBe("158px");
+      expect(player.activeText?.position).toBe(73);
+      expect(player.activeText?.pause).not.toHaveBeenCalled();
+    } finally {
+      host?.destroy();
+      geometry.mockRestore();
+      noteRoot.remove();
+    }
+  });
+
   it("mounts above the active note and detaches for a file picker without stopping audio", async () => {
     const player = samplePlayer(true);
     const bridge = phoneBridge();
