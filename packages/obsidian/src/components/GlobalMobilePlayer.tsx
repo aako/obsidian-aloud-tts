@@ -37,17 +37,18 @@ export class GlobalMobilePlayerHost {
       return;
     }
     const content = view.containerEl.querySelector(".view-content");
-    if (!content?.parentElement) {
+    if (!(content instanceof HTMLElement)) {
       this.container.remove();
       return;
     }
-    // Insert immediately before the note content. It occupies layout space,
-    // unlike the old fixed body overlay, and stays above Reader scrolling.
+    // The mobile safe-area and note header belong to Obsidian's view-content
+    // layout. Mounting before view-content bypasses that inset and covers the
+    // iOS status bar; mount inside it, ahead of the rendered article instead.
     if (
-      this.container.parentElement !== content.parentElement ||
-      this.container.nextElementSibling !== content
+      this.container.parentElement !== content ||
+      content.firstElementChild !== this.container
     ) {
-      content.parentElement.insertBefore(this.container, content);
+      content.insertBefore(this.container, content.firstChild);
     }
   }
 
